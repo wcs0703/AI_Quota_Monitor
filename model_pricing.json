@@ -1,0 +1,26 @@
+{
+  "gemini-2.0-flash": {
+    "input_per_1m": 0.10,
+    "output_per_1m": 0.40
+  },
+  "gemini-2.0-flash-lite": {
+    "input_per_1m": 0.075,
+    "output_per_1m": 0.30
+  },
+  "gemini-1.5-flash": {
+    "input_per_1m": 0.075,
+    "output_per_1m": 0.30
+  },
+  "gemini-1.5-pro": {
+    "input_per_1m": 1.25,
+    "output_per_1m": 5.00
+  },
+  "gemini-2.0-pro-exp": {
+    "input_per_1m": 1.25,
+    "output_per_1m": 5.00
+  },
+  "default": {
+    "input_per_1m": 0.10,
+    "output_per_1m": 0.40
+  }
+}
