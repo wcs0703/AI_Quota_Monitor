@@ -1,11 +1,8 @@
 # 📊 AI_Quota_Monitor — AI 配額守護與 API 監控系統
 
-[![GitHub Repository](https://img.shields.io/badge/GitHub-AI__Quota__Monitor-blue?logo=github)](https://github.com/wcs0703/AI_Quota_Monitor.git)
-[![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Windows%20%7C%20Linux-brightgreen)](https://github.com/wcs0703/AI_Quota_Monitor.git)
-[![Python](https://img.shields.io/badge/Python-3.9%2B-blue)](https://github.com/wcs0703/AI_Quota_Monitor.git)
-
 **專案名稱**：`AI_Quota_Monitor`  
-**GitHub 倉庫**：[`https://github.com/wcs0703/AI_Quota_Monitor.git`](https://github.com/wcs0703/AI_Quota_Monitor.git)  
+**GitHub 倉庫**：`https://github.com/wcs0703/AI_Quota_Monitor.git`  
+**支援平台**：`macOS` / `Windows` / `Linux`  
 **專案定位**：專為 AI 模型（Gemini / LLM）打造的跨平台 **Model 配額保活守護 (Keep-Alive)**、**即時使用量監控**、**成本計算** 與 **HTTP 異常追蹤系統**。
 
 ## 📅 發行日期
@@ -76,7 +73,7 @@ graph TD
 ### 1. 啟動 Model Quota 保活守護程式
 
 #### 🍎 macOS
-* **方式一（最直覺）**：直接在 Finder 雙擊 [`start_keepalive.command`](file:///Users/windfox/Github-Sync/AI_Quota_Monitor/start_keepalive.command)。
+* **方式一（最直覺）**：直接在 Finder 雙擊 `start_keepalive.command`。
 * **方式二（背景常駐執行）**：
   ```bash
   cd /Users/windfox/Github-Sync/AI_Quota_Monitor
@@ -105,7 +102,7 @@ python quota_keepalive.py --once
 
 ### 2. 啟動 Streamlit 監控儀表板
 
-* **macOS**：雙擊 [`start_monitor.command`](file:///Users/windfox/Github-Sync/AI_Quota_Monitor/start_monitor.command) 或執行 `./start_monitor.sh`。
+* **macOS**：雙擊 `start_monitor.command` 或執行 `./start_monitor.sh`。
 * **Windows / Linux**：
   ```bash
   streamlit run app_monitor.py --server.port 8502
