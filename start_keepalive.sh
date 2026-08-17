@@ -7,7 +7,7 @@ VENV_PYTHON="$WORKSPACE_DIR/.venv/bin/python"
 mkdir -p "$SCRIPT_DIR/logs"
 
 echo "══════════════════════════════════════════════════"
-echo "🛡️  正在啟動 Gemini Model Quota 守護與保活系統"
+echo "🛡️  正在啟動 Gemini Model Quota 守護維持系統"
 echo "══════════════════════════════════════════════════"
 
 if [ -f "$VENV_PYTHON" ]; then

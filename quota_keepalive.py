@@ -3,7 +3,7 @@
 """
 quota_keepalive.py
 =============================================================================
-跨平台 Model Quota 守護與保活程式 (macOS / Windows / Linux 通用)
+跨平台 Model Quota 守護與維持程式 (macOS / Windows / Linux 通用)
 
 功能說明：
 1. 定時（預設每 4.5 小時）自動對 Gemini 模型發送極簡請求（1 字元），消耗 ~1 Token。
@@ -166,7 +166,7 @@ def run_daemon(hours: float, model_name: str):
     """常駐守護迴圈"""
     interval_seconds = int(hours * 3600)
     print("\n" + "═" * 70)
-    print("🛡️  Gemini Model Quota 守護與保活系統 (Keep-Alive Daemon)")
+    print("🛡️  Gemini Model Quota 守護與維持系統 (Keep-Alive Daemon)")
     print(f"⏰ 檢查週期：每 {hours} 小時 (約 {interval_seconds} 秒) 自動觸發一次")
     print(f"🤖 目標模型：{model_name}")
     print(f"📂 日誌路徑：{KEEPALIVE_LOG_FILE}")
