@@ -23,16 +23,68 @@ def load_pricing() -> Dict[str, Dict[str, float]]:
 
 PRICING = load_pricing()
 
-# --- Google AI Studio Free Tier Limits Definition ---
+# --- Google AI Studio Free Tier Limits Definition (All 10 Models) ---
 MODEL_RATE_LIMITS = {
-    "gemini-3.7-flash": {"displayName": "Gemini 3.7 Flash", "category": "Text-out models", "rpm": 5, "tpm": 250000, "rpd": 20},
-    "gemini-3.6-flash": {"displayName": "Gemini 3.6 Flash", "category": "Text-out models", "rpm": 5, "tpm": 250000, "rpd": 20},
-    "gemini-3.5-flash": {"displayName": "Gemini 3.5 Flash", "category": "Text-out models", "rpm": 5, "tpm": 250000, "rpd": 20},
-    "gemini-2.5-flash": {"displayName": "Gemini 2.5 Flash", "category": "Text-out models", "rpm": 5, "tpm": 250000, "rpd": 20},
-    "gemini-3.5-flash-lite": {"displayName": "Gemini 3.5 Flash Lite", "category": "Text-out models", "rpm": 15, "tpm": 250000, "rpd": 500},
-    "gemini-3.1-flash-lite": {"displayName": "Gemini 3.1 Flash Lite", "category": "Text-out models", "rpm": 15, "tpm": 250000, "rpd": 500},
-    "gemini-2.5-flash-lite": {"displayName": "Gemini 2.5 Flash Lite", "category": "Text-out models", "rpm": 15, "tpm": 250000, "rpd": 500},
-    "antigravity": {"displayName": "Antigravity", "category": "Agents", "rpm": 60, "tpm": 100000, "rpd": 100},
+    "gemini-3.7-flash": {
+        "displayName": "Gemini 3.7 Flash",
+        "category": "Text-out models",
+        "rpm": 5, "tpm": 250000, "rpd": 20,
+        "aliases": ["gemini-3.7-flash", "gemini-3.7"]
+    },
+    "gemini-3.5-flash": {
+        "displayName": "Gemini 3.5 Flash",
+        "category": "Text-out models",
+        "rpm": 5, "tpm": 250000, "rpd": 20,
+        "aliases": ["gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.5"]
+    },
+    "gemini-2.5-flash": {
+        "displayName": "Gemini 2.5 Flash",
+        "category": "Text-out models",
+        "rpm": 5, "tpm": 250000, "rpd": 20,
+        "aliases": ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+    },
+    "gemini-3.1-flash-lite": {
+        "displayName": "Gemini 3.1 Flash Lite",
+        "category": "Text-out models",
+        "rpm": 15, "tpm": 250000, "rpd": 500,
+        "aliases": ["gemini-3.1-flash-lite", "gemini-3.1-lite"]
+    },
+    "gemini-3.5-flash-lite": {
+        "displayName": "Gemini 3.5 Flash Lite",
+        "category": "Text-out models",
+        "rpm": 15, "tpm": 250000, "rpd": 500,
+        "aliases": ["gemini-3.5-flash-lite", "gemini-2.0-flash-lite", "gemini-2.5-flash-lite"]
+    },
+    "antigravity": {
+        "displayName": "Antigravity",
+        "category": "Agents",
+        "rpm": 60, "tpm": 100000, "rpd": 100,
+        "aliases": ["antigravity", "agy", "agent-system"]
+    },
+    "nano-banana-pro": {
+        "displayName": "Nano Banana Pro (Gemini 3 Pro Image)",
+        "category": "Image models",
+        "rpm": 5, "tpm": 100000, "rpd": 20,
+        "aliases": ["nano-banana-pro", "gemini-3-pro-image", "imagen-3.0", "imagen-3"]
+    },
+    "gemini-3.1-pro": {
+        "displayName": "Gemini 3.1 Pro",
+        "category": "Text-out models",
+        "rpm": 2, "tpm": 32000, "rpd": 50,
+        "aliases": ["gemini-3.1-pro", "gemini-1.5-pro", "gemini-2.0-pro-exp"]
+    },
+    "nano-banana-2": {
+        "displayName": "Nano Banana 2 (Gemini 3.1 Flash Image)",
+        "category": "Image models",
+        "rpm": 10, "tpm": 100000, "rpd": 50,
+        "aliases": ["nano-banana-2", "gemini-3.1-flash-image"]
+    },
+    "nano-banana-2-lite": {
+        "displayName": "Nano Banana 2 Lite (Gemini 3.1 Flash Lite Image)",
+        "category": "Image models",
+        "rpm": 15, "tpm": 100000, "rpd": 100,
+        "aliases": ["nano-banana-2-lite", "gemini-3.1-flash-lite-image"]
+    }
 }
 
 # --- Database Initialization & Migration ---
@@ -215,7 +267,7 @@ def get_stats_summary(account_name: Optional[str] = None):
 
 def get_rate_limits_status(account_name: Optional[str] = None):
     """
-    計算並傳回各模型的 RPM, TPM, RPD 實時用量與配額上限狀態 (比照 Google AI Studio 介面)
+    計算並傳回各模型的 RPM, TPM, RPD 實時用量與配額上限狀態 (比照 Google AI Studio 介面，涵蓋全部 10 款模型)
     """
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
@@ -228,23 +280,32 @@ def get_rate_limits_status(account_name: Optional[str] = None):
         has_exceeded = False
 
         for model_id, limits in MODEL_RATE_LIMITS.items():
-            # 1. 查詢今日 RPD
-            params_rpd = [today_str, model_id, account_name] if filter_acc else [today_str, model_id]
+            aliases = limits.get("aliases", [model_id])
+            placeholders = ",".join(["?"] * len(aliases))
+
+            # 1. 查詢今日 RPD (計算該模型及所有別名的呼叫次數與 Token)
+            params_rpd = [today_str] + aliases
+            if filter_acc:
+                params_rpd.append(account_name)
+            
             cursor.execute(f"""
                 SELECT COUNT(*), SUM(total_tokens)
                 FROM usage_logs
-                WHERE date(timestamp) = ? AND model_name = ? {filter_acc}
+                WHERE date(timestamp) = ? AND model_name IN ({placeholders}) {filter_acc}
             """, params_rpd)
             rpd_row = cursor.fetchone()
             current_rpd = rpd_row[0] or 0
             today_tokens = rpd_row[1] or 0
 
             # 2. 查詢當前 1 分鐘內的即時 RPM 與 TPM
-            params_min = [one_min_ago, model_id, account_name] if filter_acc else [one_min_ago, model_id]
+            params_min = [one_min_ago] + aliases
+            if filter_acc:
+                params_min.append(account_name)
+
             cursor.execute(f"""
                 SELECT COUNT(*), SUM(total_tokens)
                 FROM usage_logs
-                WHERE timestamp >= ? AND model_name = ? {filter_acc}
+                WHERE timestamp >= ? AND model_name IN ({placeholders}) {filter_acc}
             """, params_min)
             min_row = cursor.fetchone()
             current_rpm = min_row[0] or 0
@@ -254,7 +315,7 @@ def get_rate_limits_status(account_name: Optional[str] = None):
             cursor.execute(f"""
                 SELECT COUNT(*)
                 FROM usage_logs
-                WHERE date(timestamp) = ? AND model_name = ? AND status_code = 429 {filter_acc}
+                WHERE date(timestamp) = ? AND model_name IN ({placeholders}) AND status_code = 429 {filter_acc}
             """, params_rpd)
             recent_429 = cursor.fetchone()[0] or 0
 
