@@ -6,51 +6,149 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+from pathlib import Path
+from dotenv import load_dotenv
+
+# 載入環境變數
+env_path = Path(__file__).resolve().parent.parent / ".env"
+if env_path.exists():
+    load_dotenv(dotenv_path=env_path)
 
 from gemini_logger import (
     DB_PATH,
     PRICING,
+    MODEL_RATE_LIMITS,
     get_stats_summary,
     get_recent_logs,
+    get_available_accounts,
+    get_rate_limits_status,
     log_api_call,
     generate_mock_data
 )
 
 # ── Streamlit Page Configuration ──
 st.set_page_config(
-    page_title="Gemini API 使用狀況監控儀表板",
+    page_title="Gemini API Rate Limit & Quota 監控儀表板",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# ── Styling ──
+# ── Custom Styling (Google AI Studio Dark Theme & Glassmorphism) ──
 st.markdown("""
 <style>
-    .metric-card {
-        background-color: #1e293b;
-        border: 1px solid #334155;
+    /* 全域背景與文字 */
+    .stApp {
+        background-color: #0d1117;
+        color: #e6edf3;
+    }
+    
+    /* 速率限制頂部區域 */
+    .rate-limit-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 8px;
+    }
+    .rate-limit-title {
+        font-size: 1.6rem;
+        font-weight: 700;
+        color: #ffffff;
+    }
+    .tier-badge {
+        background-color: #21262d;
+        border: 1px solid #30363d;
+        color: #8b949e;
+        padding: 2px 10px;
         border-radius: 12px;
-        padding: 18px 22px;
+        font-size: 0.8rem;
+        font-weight: 600;
+    }
+    
+    /* 警告橫幅 */
+    .alert-banner {
+        background-color: rgba(239, 68, 68, 0.12);
+        border: 1px solid #ef4444;
+        border-radius: 8px;
+        padding: 12px 16px;
+        color: #fca5a5;
+        margin-bottom: 20px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 0.92rem;
+    }
+    
+    /* 速率限制表格卡片 */
+    .rate-table-container {
+        background-color: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 12px;
+        padding: 16px 20px;
+        margin-bottom: 24px;
+    }
+    .rate-table-header {
+        font-size: 1.05rem;
+        font-weight: 600;
+        color: #f0f6fc;
+        margin-bottom: 4px;
+    }
+    .rate-table-sub {
+        font-size: 0.82rem;
+        color: #8b949e;
+        margin-bottom: 16px;
+    }
+    
+    /* 進度條容器與刻度 */
+    .progress-track {
+        background-color: #21262d;
+        border-radius: 4px;
+        height: 6px;
+        width: 100%;
+        overflow: hidden;
+        margin-top: 4px;
+    }
+    .progress-fill-normal {
+        background-color: #38bdf8;
+        height: 100%;
+        border-radius: 4px;
+    }
+    .progress-fill-exceeded {
+        background-color: #ef4444;
+        height: 100%;
+        border-radius: 4px;
+    }
+    .progress-fill-warning {
+        background-color: #f59e0b;
+        height: 100%;
+        border-radius: 4px;
+    }
+    
+    /* 指標卡片 */
+    .metric-card {
+        background-color: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 12px;
+        padding: 16px 20px;
         margin-bottom: 12px;
         color: #f8fafc;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
     }
     .metric-title {
-        font-size: 0.85rem;
-        color: #94a3b8;
+        font-size: 0.82rem;
+        color: #8b949e;
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.05em;
     }
     .metric-value {
-        font-size: 1.8rem;
+        font-size: 1.7rem;
         font-weight: 700;
         margin-top: 4px;
         color: #38bdf8;
     }
     .metric-sub {
-        font-size: 0.8rem;
+        font-size: 0.78rem;
         color: #64748b;
         margin-top: 2px;
     }
@@ -58,8 +156,16 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Sidebar ──
-st.sidebar.title("🤖 Gemini Monitor")
-st.sidebar.caption("即時 API 呼叫監控與 Token 用量分析系統")
+st.sidebar.title("🤖 Gemini Quota Monitor")
+st.sidebar.caption("Google AI Studio 配額與速率限制即時監控系統")
+
+# 帳號選擇器 (支援多帳號獨立追蹤)
+available_accounts = get_available_accounts()
+active_account_options = ["全部帳號 (All Accounts)"] + [a for a in available_accounts if a != "全部帳號"]
+selected_account = st.sidebar.selectbox("🧑‍💼 選擇追蹤帳號 (Project/Key)", active_account_options)
+filter_account_name = None if "全部帳號" in selected_account else selected_account
+
+time_range_choice = st.sidebar.selectbox("⏳ 時間範圍 (Time Range)", ["今日 (Today)", "近 7 天 (7 Days)", "近 28 天 (28 Days)"])
 
 auto_refresh = st.sidebar.checkbox("⏱️ 每 10 秒自動重新整理", value=False)
 if auto_refresh:
@@ -68,12 +174,12 @@ if auto_refresh:
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("🛠️ 工具與維護")
-if st.sidebar.button("🎲 產生測試模擬數據 (Seed Mock Data)", width="stretch"):
+if st.sidebar.button("🎲 產生測試模擬數據 (Seed Mock Data)", use_container_width=True):
     generate_mock_data(15)
     st.sidebar.success("已成功產生 15 筆測試日誌數據！")
     st.rerun()
 
-if st.sidebar.button("🗑️ 清空所有記錄檔", width="stretch"):
+if st.sidebar.button("🗑️ 清空所有記錄檔", use_container_width=True):
     with sqlite3.connect(DB_PATH) as conn:
         conn.cursor().execute("DELETE FROM usage_logs")
         conn.commit()
@@ -85,34 +191,121 @@ st.sidebar.write("📌 **目前數據庫**:")
 st.sidebar.code(str(DB_PATH), language="bash")
 
 # ── Fetch Data ──
-stats = get_stats_summary()
+stats = get_stats_summary(account_name=filter_account_name)
+rate_status_list, has_exceeded = get_rate_limits_status(account_name=filter_account_name)
 
-# Load all rows into DataFrame
 def load_data():
     if not DB_PATH.exists():
         return pd.DataFrame()
     with sqlite3.connect(DB_PATH) as conn:
-        df = pd.read_sql_query("SELECT * FROM usage_logs ORDER BY id DESC", conn)
+        if filter_account_name:
+            df = pd.read_sql_query("SELECT * FROM usage_logs WHERE account_name = ? ORDER BY id DESC", conn, params=(filter_account_name,))
+        else:
+            df = pd.read_sql_query("SELECT * FROM usage_logs ORDER BY id DESC", conn)
         if not df.empty:
             df['timestamp'] = pd.to_datetime(df['timestamp'])
         return df
 
 df = load_data()
 
-# ── Header ──
-st.title("📊 Gemini API 使用狀況監控儀表板")
-st.caption("即時統計 Gemini API 的請求次數、Token 消耗、延遲率、429 速率限制與預估費用")
+# ═══════════════════════════════════════════════════════════════
+# 1. Google AI Studio 頂部 Rate Limit 與警示區塊
+# ═══════════════════════════════════════════════════════════════
 
-st.markdown("<br>", unsafe_allow_html=True)
+st.markdown("""
+<div class="rate-limit-header">
+    <span class="rate-limit-title">Gemini API Rate Limit</span>
+    <span class="tier-badge">● Free tier</span>
+</div>
+""", unsafe_allow_html=True)
 
-# ── Metric Cards ──
+# 若有超額，顯示與 Google AI Studio 一模一樣的紅色警示橫幅
+if has_exceeded or stats['today_429_count'] > 0:
+    st.markdown("""
+    <div class="alert-banner">
+        <span>🚫</span>
+        <div>
+            <strong>You have reached a rate limit.</strong> Set up billing to increase your limits and unblock your work.<br>
+            <span style="font-size:0.82rem;opacity:0.9;">提示：您已達到免費層每日請求上限 (20 RPD) 或每分鐘速率限制 (5 RPM)。建議自動輪替 API 金鑰或切換至 <strong>Flash Lite (500 RPD / 15 RPM)</strong>。</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+# ═══════════════════════════════════════════════════════════════
+# 2. Rate limits by model 實時表格 (比照 Google AI Studio 視覺)
+# ═══════════════════════════════════════════════════════════════
+
+st.markdown("""
+<div class="rate-table-container">
+    <div class="rate-table-header">Rate limits by model</div>
+    <div class="rate-table-sub">Peak usage per model compared to its limit (追蹤帳號: <strong>{}</strong>)</div>
+""".format(selected_account), unsafe_allow_html=True)
+
+# 表頭
+h_c1, h_c2, h_c3, h_c4, h_c5, h_c6 = st.columns([2.2, 1.6, 2.0, 2.2, 2.0, 1.4])
+with h_c1: st.markdown("<span style='color:#8b949e;font-size:0.85rem;font-weight:600'>Model</span>", unsafe_allow_html=True)
+with h_c2: st.markdown("<span style='color:#8b949e;font-size:0.85rem;font-weight:600'>Category</span>", unsafe_allow_html=True)
+with h_c3: st.markdown("<span style='color:#8b949e;font-size:0.85rem;font-weight:600'>RPM (Req/min)</span>", unsafe_allow_html=True)
+with h_c4: st.markdown("<span style='color:#8b949e;font-size:0.85rem;font-weight:600'>TPM (Tokens/min)</span>", unsafe_allow_html=True)
+with h_c5: st.markdown("<span style='color:#8b949e;font-size:0.85rem;font-weight:600'>RPD (Req/day)</span>", unsafe_allow_html=True)
+with h_c6: st.markdown("<span style='color:#8b949e;font-size:0.85rem;font-weight:600'>Status</span>", unsafe_allow_html=True)
+
+st.markdown("<hr style='border-color:#30363d;margin:6px 0 12px 0'>", unsafe_allow_html=True)
+
+# 依序呈現各模型數據
+for item in rate_status_list:
+    r_c1, r_c2, r_c3, r_c4, r_c5, r_c6 = st.columns([2.2, 1.6, 2.0, 2.2, 2.0, 1.4])
+    
+    # 判斷顏色 class
+    rpm_color_cls = "progress-fill-exceeded" if item['current_rpm'] >= item['max_rpm'] else ("progress-fill-warning" if item['rpm_pct'] >= 80 else "progress-fill-normal")
+    rpd_color_cls = "progress-fill-exceeded" if item['current_rpd'] >= item['max_rpd'] else ("progress-fill-warning" if item['rpd_pct'] >= 80 else "progress-fill-normal")
+    tpm_color_cls = "progress-fill-exceeded" if item['current_tpm'] >= item['max_tpm'] else "progress-fill-normal"
+
+    rpm_text_color = "#ef4444" if item['current_rpm'] >= item['max_rpm'] else "#f0f6fc"
+    rpd_text_color = "#ef4444" if item['current_rpd'] >= item['max_rpd'] else "#f0f6fc"
+
+    tpm_display = f"{item['current_tpm'] / 1000:.2f}K" if item['current_tpm'] >= 1000 else f"{item['current_tpm']}"
+    max_tpm_display = f"{item['max_tpm'] / 1000:.0f}K"
+
+    status_badge = "🔴 已達上限" if item['is_exceeded'] else ("🟡 接近上限" if item['rpd_pct'] >= 80 else "🟢 正常")
+
+    with r_c1:
+        st.markdown(f"<span style='font-weight:600;color:#f0f6fc;font-size:0.92rem'>{item['displayName']}</span>", unsafe_allow_html=True)
+    with r_c2:
+        st.markdown(f"<span style='color:#8b949e;font-size:0.85rem'>{item['category']}</span>", unsafe_allow_html=True)
+    with r_c3:
+        st.markdown(f"""
+        <div style='font-size:0.85rem;color:{rpm_text_color};font-weight:600'>{item['current_rpm']} / {item['max_rpm']}</div>
+        <div class="progress-track"><div class="{rpm_color_cls}" style="width:{item['rpm_pct']}%"></div></div>
+        """, unsafe_allow_html=True)
+    with r_c4:
+        st.markdown(f"""
+        <div style='font-size:0.85rem;color:#f0f6fc;font-weight:600'>{tpm_display} / {max_tpm_display}</div>
+        <div class="progress-track"><div class="{tpm_color_cls}" style="width:{item['tpm_pct']}%"></div></div>
+        """, unsafe_allow_html=True)
+    with r_c5:
+        st.markdown(f"""
+        <div style='font-size:0.85rem;color:{rpd_text_color};font-weight:600'>{item['current_rpd']} / {item['max_rpd']}</div>
+        <div class="progress-track"><div class="{rpd_color_cls}" style="width:{item['rpd_pct']}%"></div></div>
+        """, unsafe_allow_html=True)
+    with r_c6:
+        st.markdown(f"<span style='font-size:0.82rem'>{status_badge}</span>", unsafe_allow_html=True)
+    
+    st.markdown("<div style='margin-bottom:8px'></div>", unsafe_allow_html=True)
+
+st.markdown("</div>", unsafe_allow_html=True)
+
+# ═══════════════════════════════════════════════════════════════
+# 3. 核心指標卡片 (Metric Cards)
+# ═══════════════════════════════════════════════════════════════
+
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
     st.markdown(f"""
     <div class="metric-card">
         <div class="metric-title">今日總呼叫次數</div>
-        <div class="metric-value">{stats['today_calls']:,} <span style="font-size:1rem;color:#94a3b8">次</span></div>
+        <div class="metric-value">{stats['today_calls']:,} <span style="font-size:1rem;color:#8b949e">次</span></div>
         <div class="metric-sub">歷史總計: {stats['all_calls']:,} 次</div>
     </div>
     """, unsafe_allow_html=True)
@@ -121,7 +314,7 @@ with col2:
     st.markdown(f"""
     <div class="metric-card">
         <div class="metric-title">今日 Token 總用量</div>
-        <div class="metric-value">{stats['today_total_tokens']:,} <span style="font-size:1rem;color:#94a3b8">tokens</span></div>
+        <div class="metric-value">{stats['today_total_tokens']:,} <span style="font-size:1rem;color:#8b949e">tokens</span></div>
         <div class="metric-sub">In: {stats['today_prompt_tokens']:,} | Out: {stats['today_output_tokens']:,}</div>
     </div>
     """, unsafe_allow_html=True)
@@ -140,15 +333,18 @@ with col4:
     st.markdown(f"""
     <div class="metric-card">
         <div class="metric-title">今日 429 速率限制 / 報錯</div>
-        <div class="metric-value" style="color:{err_color}">{stats['today_429_count']} <span style="font-size:1rem;color:#94a3b8">次 429</span></div>
+        <div class="metric-value" style="color:{err_color}">{stats['today_429_count']} <span style="font-size:1rem;color:#8b949e">次 429</span></div>
         <div class="metric-sub">其他報錯: {stats['today_errors'] - stats['today_429_count']} 次 | 平均延遲: {stats['today_avg_latency']:.0f} ms</div>
     </div>
     """, unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# ── Main Tabs ──
-tab1, tab2, tab3, tab4 = st.tabs(["📈 用量與費用趨勢", "🤖 模型用量分析", "📋 API 呼叫日誌", "⚡ Live 探針測試"])
+# ═══════════════════════════════════════════════════════════════
+# 4. 主分頁區塊 (Main Tabs)
+# ═══════════════════════════════════════════════════════════════
+
+tab1, tab2, tab3, tab4 = st.tabs(["📈 用量與費用趨勢", "🤖 模型與帳號分析", "📋 API 呼叫日誌", "⚡ Live 探針測試"])
 
 # ── TAB 1: Trends ──
 with tab1:
@@ -156,7 +352,6 @@ with tab1:
     if df.empty:
         st.info("💡 目前尚無 API 呼叫紀錄。點擊左側「產生測試模擬數據」即可即時查看圖表效果。")
     else:
-        # Group by Date or Hour
         time_frame = st.radio("趨勢聚合單位", ["每小時 (Hourly)", "每日 (Daily)"], horizontal=True)
         
         df_trend = df.copy()
@@ -185,7 +380,7 @@ with tab1:
                 color_discrete_map={'prompt_tokens': '#60a5fa', 'output_tokens': '#c084fc'}
             )
             fig_tokens.update_layout(template="plotly_dark", barmode='stack')
-            st.plotly_chart(fig_tokens, width="stretch")
+            st.plotly_chart(fig_tokens, use_container_width=True)
 
         with col_t2:
             st.markdown("#### 🔹 請求次數與預估費用")
@@ -197,53 +392,53 @@ with tab1:
             )
             fig_cost.update_traces(line_color='#4ade80', marker_size=8)
             fig_cost.update_layout(template="plotly_dark")
-            st.plotly_chart(fig_cost, width="stretch")
+            st.plotly_chart(fig_cost, use_container_width=True)
 
-# ── TAB 2: Model Breakdown ──
+# ── TAB 2: Model & Account Breakdown ──
 with tab2:
-    st.subheader("🤖 各 Gemini 模型呼叫與 Token 分布")
+    st.subheader("🤖 各模型與帳號呼叫用量分布")
     if df.empty:
         st.info("💡 目前尚無紀錄數據。")
     else:
-        model_group = df.groupby('model_name').agg({
-            'id': 'count',
-            'total_tokens': 'sum',
-            'estimated_cost': 'sum',
-            'latency_ms': 'mean'
-        }).reset_index()
-
         col_m1, col_m2 = st.columns(2)
 
         with col_m1:
-            st.markdown("#### 🍰 模型呼叫比例 (Calls Distribution)")
+            st.markdown("#### 🍰 模型呼叫比例 (Calls by Model)")
+            model_group = df.groupby('model_name').agg({'id': 'count'}).reset_index()
             fig_pie = px.pie(
                 model_group, values='id', names='model_name',
                 hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel
             )
             fig_pie.update_layout(template="plotly_dark")
-            st.plotly_chart(fig_pie, width="stretch")
+            st.plotly_chart(fig_pie, use_container_width=True)
 
         with col_m2:
-            st.markdown("#### 📊 各模型花費 (Estimated Cost by Model)")
-            fig_bar = px.bar(
-                model_group, x='model_name', y='estimated_cost',
-                color='model_name', title="模型花費排行 (USD)",
-                labels={'estimated_cost': '預估費用 (USD)', 'model_name': '模型名稱'},
-                color_discrete_sequence=px.colors.qualitative.Bold
-            )
-            fig_bar.update_layout(template="plotly_dark")
-            st.plotly_chart(fig_bar, width="stretch")
+            st.markdown("#### 🧑‍💼 各帳號用量分布 (Calls by Account)")
+            if 'account_name' in df.columns:
+                acc_group = df.groupby('account_name').agg({'id': 'count', 'total_tokens': 'sum'}).reset_index()
+                fig_acc = px.bar(
+                    acc_group, x='account_name', y='total_tokens', color='account_name',
+                    title="各帳號 Token 總消耗", labels={'total_tokens': 'Token 總數', 'account_name': '帳號名稱'}
+                )
+                fig_acc.update_layout(template="plotly_dark")
+                st.plotly_chart(fig_acc, use_container_width=True)
 
         st.markdown("#### 📋 模型統計詳細數據")
+        model_detail = df.groupby('model_name').agg({
+            'id': 'count',
+            'total_tokens': 'sum',
+            'estimated_cost': 'sum',
+            'latency_ms': 'mean'
+        }).reset_index()
         st.dataframe(
-            model_group.rename(columns={
+            model_detail.rename(columns={
                 'model_name': '模型名稱',
                 'id': '呼叫次數',
                 'total_tokens': '總 Token 消耗',
                 'estimated_cost': '總費用 (USD)',
                 'latency_ms': '平均回應時間 (ms)'
             }),
-            width="stretch"
+            use_container_width=True
         )
 
 # ── TAB 3: Logs ──
@@ -277,70 +472,68 @@ with tab3:
                 df_filtered['error_message'].str.contains(search_query, case=False, na=False)
             ]
 
-        st.dataframe(
-            df_filtered[['id', 'timestamp', 'model_name', 'prompt_tokens', 'output_tokens', 'total_tokens', 'latency_ms', 'status_code', 'estimated_cost', 'caller_info', 'error_message']],
-            width="stretch"
-        )
+        cols_to_show = ['id', 'timestamp', 'account_name', 'model_name', 'prompt_tokens', 'output_tokens', 'total_tokens', 'latency_ms', 'status_code', 'estimated_cost', 'caller_info', 'error_message']
+        existing_cols = [c for c in cols_to_show if c in df_filtered.columns]
+        st.dataframe(df_filtered[existing_cols], use_container_width=True)
 
 # ── TAB 4: Live Probe Tester ──
 with tab4:
     st.subheader("⚡ 即時 API 探針與延遲測試 (Live Probe)")
-    st.write("說明：透過您的 `GOOGLE_API_KEY` 發送測試請求，即時驗證 Token 統計與耗時，並自動寫入數據庫。")
+    st.write("說明：選擇您在 `.env` 中設定的帳號金鑰發送測試請求，即時驗證 Token 統計與耗時，並自動寫入數據庫。")
 
-    api_key_input = st.text_input("GOOGLE_API_KEY", value=os.getenv("GOOGLE_API_KEY", ""), type="password")
-    model_choice = st.selectbox("測試模型", ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-lite"])
-    test_prompt = st.text_area("測試 Prompt", value="請用繁體中文簡要回答：什麼是人工智慧的 RAG 架構？(100字內)")
+    probe_accounts = {
+        "Whisper_correction (金鑰 1)": os.getenv("Whisper_correction", ""),
+        "Whiskey_correction (金鑰 2)": os.getenv("Whiskey_correction", ""),
+        "GEMINI_API_KEY / 預設 (金鑰 3)": os.getenv("GEMINI_API_KEY", "") or os.getenv("GOOGLE_API_KEY", "")
+    }
 
-    if st.button("🚀 發送探針測試請求", type="primary", width="stretch"):
+    col_p1, col_p2 = st.columns(2)
+    with col_p1:
+        chosen_acc_label = st.selectbox("選擇測試帳號 (API Key)", list(probe_accounts.keys()))
+        selected_key = probe_accounts[chosen_acc_label]
+        api_key_input = st.text_input("API Key (自動載入)", value=selected_key, type="password")
+    with col_p2:
+        model_choice = st.selectbox("測試模型", ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"])
+        test_prompt = st.text_area("測試 Prompt", value="請用繁體中文簡要回答：什麼是人工智慧的 RAG 架構？(50字內)")
+
+    if st.button("🚀 發送探針測試請求", type="primary", use_container_width=True):
         if not api_key_input:
-            st.error("❌ 請輸入 GOOGLE_API_KEY 後再進行測試！")
+            st.error("❌ 找不到該帳號的 API Key，請在 .env 中填寫！")
         else:
             st.info("🔄 正在連線至 Gemini API...")
             t0 = time.time()
+            account_tag = chosen_acc_label.split(" ")[0]
             try:
-                # Import google.generativeai or google-genai
-                try:
-                    from google import genai
-                    client = genai.Client(api_key=api_key_input)
-                    response = client.models.generate_content(
-                        model=model_choice,
-                        contents=test_prompt
-                    )
-                    latency = (time.time() - t0) * 1000.0
-                    
-                    # Extract tokens
-                    p_tok = getattr(response.usage_metadata, 'prompt_token_count', 0) if hasattr(response, 'usage_metadata') else 0
-                    o_tok = getattr(response.usage_metadata, 'candidates_token_count', 0) if hasattr(response, 'usage_metadata') else 0
-                    text_out = response.text
-                except Exception as e1:
-                    # Fallback to google.generativeai
-                    import google.generativeai as genai_legacy
-                    genai_legacy.configure(api_key=api_key_input)
-                    m = genai_legacy.GenerativeModel(model_choice)
-                    response = m.generate_content(test_prompt)
-                    latency = (time.time() - t0) * 1000.0
-                    p_tok = getattr(response.usage_metadata, 'prompt_token_count', 0) if hasattr(response, 'usage_metadata') else 0
-                    o_tok = getattr(response.usage_metadata, 'candidates_token_count', 0) if hasattr(response, 'usage_metadata') else 0
-                    text_out = response.text
+                from google import genai
+                client = genai.Client(api_key=api_key_input)
+                response = client.models.generate_content(
+                    model=model_choice,
+                    contents=test_prompt
+                )
+                latency = (time.time() - t0) * 1000.0
+                
+                p_tok = getattr(response.usage_metadata, 'prompt_token_count', 0) if hasattr(response, 'usage_metadata') else 0
+                o_tok = getattr(response.usage_metadata, 'candidates_token_count', 0) if hasattr(response, 'usage_metadata') else 0
+                text_out = response.text
 
-                # Log to DB
-                log_id = log_api_call(
+                log_api_call(
                     model_name=model_choice,
                     prompt_tokens=p_tok,
                     output_tokens=o_tok,
                     latency_ms=latency,
                     status_code=200,
-                    caller_info="Live Probe Test"
+                    caller_info="Live Probe Test",
+                    account_name=account_tag
                 )
 
-                st.success(f"✅ 請求成功！(耗時: {latency:.1f} ms | Input: {p_tok} tokens | Output: {o_tok} tokens)")
+                st.success(f"✅ 請求成功！(耗時: {latency:.1f} ms | In: {p_tok} tokens | Out: {o_tok} tokens)")
                 st.markdown("##### 💬 回應內容:")
                 st.write(text_out)
                 st.rerun()
 
             except Exception as ex:
                 latency = (time.time() - t0) * 1000.0
-                status_code = 429 if "429" in str(ex) or "Quota" in str(ex) else 500
+                status_code = 429 if "429" in str(ex) or "RESOURCE_EXHAUSTED" in str(ex) else 500
                 log_api_call(
                     model_name=model_choice,
                     prompt_tokens=0,
@@ -348,6 +541,7 @@ with tab4:
                     latency_ms=latency,
                     status_code=status_code,
                     error_message=str(ex),
-                    caller_info="Live Probe Test Error"
+                    caller_info="Live Probe Test Error",
+                    account_name=account_tag
                 )
                 st.error(f"❌ 請求失敗 (狀態碼 {status_code}): {ex}")

@@ -23,7 +23,19 @@ def load_pricing() -> Dict[str, Dict[str, float]]:
 
 PRICING = load_pricing()
 
-# --- Database Initialization ---
+# --- Google AI Studio Free Tier Limits Definition ---
+MODEL_RATE_LIMITS = {
+    "gemini-3.7-flash": {"displayName": "Gemini 3.7 Flash", "category": "Text-out models", "rpm": 5, "tpm": 250000, "rpd": 20},
+    "gemini-3.6-flash": {"displayName": "Gemini 3.6 Flash", "category": "Text-out models", "rpm": 5, "tpm": 250000, "rpd": 20},
+    "gemini-3.5-flash": {"displayName": "Gemini 3.5 Flash", "category": "Text-out models", "rpm": 5, "tpm": 250000, "rpd": 20},
+    "gemini-2.5-flash": {"displayName": "Gemini 2.5 Flash", "category": "Text-out models", "rpm": 5, "tpm": 250000, "rpd": 20},
+    "gemini-3.5-flash-lite": {"displayName": "Gemini 3.5 Flash Lite", "category": "Text-out models", "rpm": 15, "tpm": 250000, "rpd": 500},
+    "gemini-3.1-flash-lite": {"displayName": "Gemini 3.1 Flash Lite", "category": "Text-out models", "rpm": 15, "tpm": 250000, "rpd": 500},
+    "gemini-2.5-flash-lite": {"displayName": "Gemini 2.5 Flash Lite", "category": "Text-out models", "rpm": 15, "tpm": 250000, "rpd": 500},
+    "antigravity": {"displayName": "Antigravity", "category": "Agents", "rpm": 60, "tpm": 100000, "rpd": 100},
+}
+
+# --- Database Initialization & Migration ---
 def init_db():
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
@@ -39,11 +51,20 @@ def init_db():
                 status_code INTEGER DEFAULT 200,
                 estimated_cost REAL DEFAULT 0.0,
                 error_message TEXT DEFAULT '',
-                caller_info TEXT DEFAULT ''
+                caller_info TEXT DEFAULT '',
+                account_name TEXT DEFAULT '預設帳號'
             )
         """)
+        
+        # 檢查並自動遷移舊版資料表 (追加 account_name 欄位)
+        cursor.execute("PRAGMA table_info(usage_logs)")
+        cols = [col[1] for col in cursor.fetchall()]
+        if "account_name" not in cols:
+            cursor.execute("ALTER TABLE usage_logs ADD COLUMN account_name TEXT DEFAULT '預設帳號'")
+
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON usage_logs(timestamp)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_model ON usage_logs(model_name)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_account ON usage_logs(account_name)")
         conn.commit()
 
 init_db()
@@ -73,11 +94,12 @@ def log_api_call(
     latency_ms: float = 0.0,
     status_code: int = 200,
     error_message: str = "",
-    caller_info: str = ""
+    caller_info: str = "",
+    account_name: str = "預設帳號"
 ) -> int:
-    """Logs a single Gemini API call to SQLite."""
+    """Logs a single Gemini API call to SQLite with account tracking."""
     if status_code != 200 or error_message:
-        log_file_error(f"Model: {model_name} | Status: {status_code} | Msg: {error_message}")
+        log_file_error(f"Account: {account_name} | Model: {model_name} | Status: {status_code} | Msg: {error_message}")
     total_tokens = prompt_tokens + output_tokens
     cost = calculate_cost(model_name, prompt_tokens, output_tokens)
     
@@ -86,22 +108,21 @@ def log_api_call(
         cursor.execute("""
             INSERT INTO usage_logs (
                 model_name, prompt_tokens, output_tokens, total_tokens,
-                latency_ms, status_code, estimated_cost, error_message, caller_info
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                latency_ms, status_code, estimated_cost, error_message, caller_info, account_name
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             model_name, prompt_tokens, output_tokens, total_tokens,
-            round(latency_ms, 2), status_code, cost, error_message, caller_info
+            round(latency_ms, 2), status_code, cost, error_message, caller_info, account_name
         ))
         conn.commit()
         return cursor.lastrowid
 
-def log_gemini_response(response: Any, model_name: str, start_time: float, caller_info: str = ""):
-    """Utility helper to extract tokens from a google-genai / google.generativeai response object and log it."""
+def log_gemini_response(response: Any, model_name: str, start_time: float, caller_info: str = "", account_name: str = "預設帳號"):
+    """Utility helper to extract tokens from a google-genai response object and log it."""
     latency_ms = (time.time() - start_time) * 1000.0
     prompt_tokens = 0
     output_tokens = 0
     
-    # Try google-genai / google.generativeai attributes
     try:
         if hasattr(response, 'usage_metadata'):
             meta = response.usage_metadata
@@ -116,24 +137,42 @@ def log_gemini_response(response: Any, model_name: str, start_time: float, calle
         output_tokens=output_tokens,
         latency_ms=latency_ms,
         status_code=200,
-        caller_info=caller_info
+        caller_info=caller_info,
+        account_name=account_name
     )
 
 # --- Database Query Helpers ---
-def get_recent_logs(limit: int = 100):
+def get_available_accounts() -> list:
+    """取得資料庫中已記錄的所有帳號名稱"""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT DISTINCT account_name FROM usage_logs WHERE account_name IS NOT NULL AND account_name != ''")
+        rows = cursor.fetchall()
+        accounts = [r[0] for r in rows]
+        if not accounts:
+            accounts = ["預設帳號"]
+        return accounts
+
+def get_recent_logs(limit: int = 100, account_name: Optional[str] = None):
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM usage_logs ORDER BY id DESC LIMIT ?", (limit,))
+        if account_name and account_name != "全部帳號":
+            cursor.execute("SELECT * FROM usage_logs WHERE account_name = ? ORDER BY id DESC LIMIT ?", (account_name, limit))
+        else:
+            cursor.execute("SELECT * FROM usage_logs ORDER BY id DESC LIMIT ?", (limit,))
         return [dict(row) for row in cursor.fetchall()]
 
-def get_stats_summary():
+def get_stats_summary(account_name: Optional[str] = None):
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
-        
-        # Today
         today_str = datetime.date.today().isoformat()
-        cursor.execute("""
+        
+        filter_sql = "AND account_name = ?" if (account_name and account_name != "全部帳號") else ""
+        params_today = [today_str, account_name] if filter_sql else [today_str]
+        params_all = [account_name] if filter_sql else []
+
+        cursor.execute(f"""
             SELECT 
                 COUNT(*),
                 SUM(prompt_tokens),
@@ -144,12 +183,11 @@ def get_stats_summary():
                 SUM(CASE WHEN status_code = 429 THEN 1 ELSE 0 END),
                 SUM(CASE WHEN status_code != 200 THEN 1 ELSE 0 END)
             FROM usage_logs
-            WHERE date(timestamp) = ?
-        """, (today_str,))
+            WHERE date(timestamp) = ? {filter_sql}
+        """, params_today)
         today_row = cursor.fetchone()
         
-        # All time
-        cursor.execute("""
+        cursor.execute(f"""
             SELECT 
                 COUNT(*),
                 SUM(prompt_tokens),
@@ -157,7 +195,8 @@ def get_stats_summary():
                 SUM(total_tokens),
                 SUM(estimated_cost)
             FROM usage_logs
-        """)
+            WHERE 1=1 {filter_sql}
+        """, params_all)
         all_row = cursor.fetchone()
 
         return {
@@ -174,14 +213,89 @@ def get_stats_summary():
             "all_cost": round(all_row[4] or 0.0, 4)
         }
 
+def get_rate_limits_status(account_name: Optional[str] = None):
+    """
+    計算並傳回各模型的 RPM, TPM, RPD 實時用量與配額上限狀態 (比照 Google AI Studio 介面)
+    """
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        today_str = datetime.date.today().isoformat()
+        one_min_ago = (datetime.datetime.now() - datetime.timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M:%S")
+
+        filter_acc = "AND account_name = ?" if (account_name and account_name != "全部帳號") else ""
+        
+        status_list = []
+        has_exceeded = False
+
+        for model_id, limits in MODEL_RATE_LIMITS.items():
+            # 1. 查詢今日 RPD
+            params_rpd = [today_str, model_id, account_name] if filter_acc else [today_str, model_id]
+            cursor.execute(f"""
+                SELECT COUNT(*), SUM(total_tokens)
+                FROM usage_logs
+                WHERE date(timestamp) = ? AND model_name = ? {filter_acc}
+            """, params_rpd)
+            rpd_row = cursor.fetchone()
+            current_rpd = rpd_row[0] or 0
+            today_tokens = rpd_row[1] or 0
+
+            # 2. 查詢當前 1 分鐘內的即時 RPM 與 TPM
+            params_min = [one_min_ago, model_id, account_name] if filter_acc else [one_min_ago, model_id]
+            cursor.execute(f"""
+                SELECT COUNT(*), SUM(total_tokens)
+                FROM usage_logs
+                WHERE timestamp >= ? AND model_name = ? {filter_acc}
+            """, params_min)
+            min_row = cursor.fetchone()
+            current_rpm = min_row[0] or 0
+            current_tpm = min_row[1] or 0
+
+            # 3. 檢查最近是否有 429 錯誤
+            cursor.execute(f"""
+                SELECT COUNT(*)
+                FROM usage_logs
+                WHERE date(timestamp) = ? AND model_name = ? AND status_code = 429 {filter_acc}
+            """, params_rpd)
+            recent_429 = cursor.fetchone()[0] or 0
+
+            # 計算百分比與狀態
+            rpd_pct = min((current_rpd / limits["rpd"]) * 100.0, 100.0) if limits["rpd"] > 0 else 0
+            rpm_pct = min((current_rpm / limits["rpm"]) * 100.0, 100.0) if limits["rpm"] > 0 else 0
+            tpm_pct = min((current_tpm / limits["tpm"]) * 100.0, 100.0) if limits["tpm"] > 0 else 0
+
+            is_exceeded = (current_rpd >= limits["rpd"]) or (current_rpm >= limits["rpm"]) or (recent_429 > 0)
+            if is_exceeded:
+                has_exceeded = True
+
+            status_list.append({
+                "model_id": model_id,
+                "displayName": limits["displayName"],
+                "category": limits["category"],
+                "current_rpm": current_rpm,
+                "max_rpm": limits["rpm"],
+                "rpm_pct": rpm_pct,
+                "current_tpm": current_tpm,
+                "max_tpm": limits["tpm"],
+                "tpm_pct": tpm_pct,
+                "current_rpd": current_rpd,
+                "max_rpd": limits["rpd"],
+                "rpd_pct": rpd_pct,
+                "recent_429": recent_429,
+                "is_exceeded": is_exceeded
+            })
+
+        return status_list, has_exceeded
+
 # --- Mock Data Generator for Testing ---
 def generate_mock_data(count: int = 15):
     import random
-    models = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-lite"]
+    models = ["gemini-3.7-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"]
+    accounts = ["Whisper_correction", "Whiskey_correction", "GEMINI_API_KEY_3"]
     statuses = [200, 200, 200, 200, 200, 429, 200, 500]
     
     for _ in range(count):
         m = random.choice(models)
+        acc = random.choice(accounts)
         p_tok = random.randint(150, 4500)
         o_tok = random.randint(50, 1200)
         st = random.choice(statuses)
@@ -194,10 +308,13 @@ def generate_mock_data(count: int = 15):
             latency_ms=lat,
             status_code=st,
             error_message=err,
-            caller_info="Mock Data Seed"
+            caller_info="Mock Data Seed",
+            account_name=acc
         )
 
 if __name__ == "__main__":
     print("Database initialized at:", DB_PATH)
     stats = get_stats_summary()
     print("Current Stats Summary:", stats)
+    limits, exceeded = get_rate_limits_status()
+    print("Rate Limits Status count:", len(limits), "Exceeded:", exceeded)
