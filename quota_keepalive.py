@@ -7,7 +7,7 @@ quota_keepalive.py
 
 功能說明：
 1. 定時（預設每 4.5 小時）自動對 Gemini 模型發送極簡請求（1 字元），消耗 ~1 Token。
-2. 提前啟動 5 小時配額重置窗口（5-Hour Reset Window），避免重度使用時配額重置被往後延。
+2. 提前啟動 5 小時配額重置週期（5-Hour Reset Window），避免重度使用時配額重置被往後延。
 3. 採用純 Python 標準庫 (urllib.request)，零第三方 SDK 相依性，跨平台 100% 開箱即用。
 4. 每次 Ping 結果自動寫入本機 SQLite 資料庫 (gemini_usage.db) 與 logs/keepalive.log。
 5. 支援「單次執行模式 (--once)」，方便配合系統排程 (cron/Task Scheduler) 呼叫。
@@ -118,7 +118,7 @@ def send_ping(model_name: str = "gemini-2.5-flash") -> bool:
                     caller_info="Quota_KeepAlive"
                 )
 
-            write_log(f"✅ Keep-Alive 成功！模型: {model_name} | 耗時: {latency_ms:.1f}ms | 回應: '{reply_text}' | 配額窗口已激活")
+            write_log(f"✅ Keep-Alive 成功！模型: {model_name} | 耗時: {latency_ms:.1f}ms | 回應: '{reply_text}' | 配額週期已啟用")
             return True
 
     except urllib.error.HTTPError as e:
