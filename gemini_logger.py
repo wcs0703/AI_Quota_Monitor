@@ -108,6 +108,21 @@ def init_db():
             )
         """)
         
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS antigravity_quota (
+                id INTEGER PRIMARY KEY,
+                plan_name TEXT DEFAULT 'Google AI Pro',
+                credit_overages INTEGER DEFAULT 0,
+                gemini_weekly_pct REAL DEFAULT 86.0,
+                gemini_weekly_refresh_seconds INTEGER DEFAULT 169200,
+                gemini_5hr_pct REAL DEFAULT 92.0,
+                gemini_5hr_refresh_seconds INTEGER DEFAULT 15840,
+                claude_gpt_weekly_pct REAL DEFAULT 100.0,
+                claude_gpt_5hr_pct REAL DEFAULT 100.0,
+                updated_at DATETIME DEFAULT (datetime('now', 'localtime'))
+            )
+        """)
+        
         # 檢查並自動遷移舊版資料表 (追加 account_name 欄位)
         cursor.execute("PRAGMA table_info(usage_logs)")
         cols = [col[1] for col in cursor.fetchall()]
@@ -117,9 +132,87 @@ def init_db():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON usage_logs(timestamp)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_model ON usage_logs(model_name)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_account ON usage_logs(account_name)")
+
+        # 初始化一筆 Antigravity 配額預設資料 (若無資料)
+        cursor.execute("SELECT COUNT(*) FROM antigravity_quota")
+        if cursor.fetchone()[0] == 0:
+            cursor.execute("""
+                INSERT INTO antigravity_quota (
+                    id, plan_name, credit_overages,
+                    gemini_weekly_pct, gemini_weekly_refresh_seconds,
+                    gemini_5hr_pct, gemini_5hr_refresh_seconds,
+                    claude_gpt_weekly_pct, claude_gpt_5hr_pct, updated_at
+                ) VALUES (1, 'Google AI Pro', 0, 86.0, 169200, 92.0, 15840, 100.0, 100.0, datetime('now', 'localtime'))
+            """)
+
         conn.commit()
 
 init_db()
+
+# --- Antigravity Quota Helpers ---
+def get_antigravity_quota() -> dict:
+    """取得 Antigravity IDE 當前模型配額狀態與倒數資訊"""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM antigravity_quota WHERE id = 1")
+        row = cursor.fetchone()
+        if not row:
+            return {
+                "plan_name": "Google AI Pro",
+                "credit_overages": 0,
+                "gemini_weekly_pct": 86.0,
+                "gemini_weekly_desc": "1 day, 23 hours",
+                "gemini_5hr_pct": 92.0,
+                "gemini_5hr_desc": "4 hours, 24 minutes",
+                "claude_gpt_weekly_pct": 100.0,
+                "claude_gpt_5hr_pct": 100.0,
+                "updated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+
+        data = dict(row)
+        # 計算動態倒數
+        try:
+            updated_dt = datetime.datetime.strptime(data["updated_at"], "%Y-%m-%d %H:%M:%S")
+            elapsed = (datetime.datetime.now() - updated_dt).total_seconds()
+        except Exception:
+            elapsed = 0
+
+        w_rem = max(0, data["gemini_weekly_refresh_seconds"] - int(elapsed))
+        h_rem = max(0, data["gemini_5hr_refresh_seconds"] - int(elapsed))
+
+        w_days = w_rem // 86400
+        w_hours = (w_rem % 86400) // 3600
+        data["gemini_weekly_desc"] = f"{w_days} day{'s' if w_days > 1 else ''}, {w_hours} hours" if w_rem > 0 else "Fully Refreshed"
+
+        h_hours = h_rem // 3600
+        h_mins = (h_rem % 3600) // 60
+        data["gemini_5hr_desc"] = f"{h_hours} hours, {h_mins} minutes" if h_rem > 0 else "Fully Refreshed"
+
+        return data
+
+def update_antigravity_quota(
+    gemini_weekly_pct: float,
+    gemini_weekly_hours: float,
+    gemini_5hr_pct: float,
+    gemini_5hr_mins: float,
+    plan_name: str = "Google AI Pro",
+    credit_overages: int = 0
+):
+    """更新/校準 Antigravity 配額數據"""
+    weekly_sec = int(gemini_weekly_hours * 3600)
+    fivehr_sec = int(gemini_5hr_mins * 60)
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE antigravity_quota
+            SET plan_name = ?, credit_overages = ?,
+                gemini_weekly_pct = ?, gemini_weekly_refresh_seconds = ?,
+                gemini_5hr_pct = ?, gemini_5hr_refresh_seconds = ?,
+                updated_at = datetime('now', 'localtime')
+            WHERE id = 1
+        """, (plan_name, credit_overages, gemini_weekly_pct, weekly_sec, gemini_5hr_pct, fivehr_sec))
+        conn.commit()
 
 # --- Cost Calculator ---
 def calculate_cost(model_name: str, prompt_tokens: int, output_tokens: int) -> float:

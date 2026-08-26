@@ -22,25 +22,28 @@ from gemini_logger import (
     get_recent_logs,
     get_available_accounts,
     get_rate_limits_status,
+    get_antigravity_quota,
+    update_antigravity_quota,
     log_api_call,
     generate_mock_data
 )
 
 # ── Streamlit Page Configuration ──
 st.set_page_config(
-    page_title="Gemini API Rate Limit & Quota 監控儀表板",
+    page_title="Gemini & Antigravity Quota 監控儀表板",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# ── Custom Styling (Google AI Studio Dark Theme & Glassmorphism) ──
+# ── Custom Styling (Google AI Studio & Antigravity IDE Dark Theme) ──
 st.markdown("""
 <style>
     /* 全域背景與文字 */
     .stApp {
         background-color: #0d1117;
         color: #e6edf3;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
     
     /* 速率限制頂部區域 */
@@ -84,11 +87,11 @@ st.markdown("""
         background-color: #161b22;
         border: 1px solid #30363d;
         border-radius: 12px;
-        padding: 16px 20px;
+        padding: 18px 22px;
         margin-bottom: 24px;
     }
     .rate-table-header {
-        font-size: 1.05rem;
+        font-size: 1.1rem;
         font-weight: 600;
         color: #f0f6fc;
         margin-bottom: 4px;
@@ -152,12 +155,76 @@ st.markdown("""
         color: #64748b;
         margin-top: 2px;
     }
+
+    /* 🛸 Antigravity IDE Models & Usage 卡片樣式 */
+    .agy-container {
+        background-color: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 14px;
+        padding: 20px 24px;
+        margin-bottom: 24px;
+    }
+    .agy-title {
+        font-size: 1.4rem;
+        font-weight: 700;
+        color: #ffffff;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .agy-subtitle {
+        font-size: 0.88rem;
+        color: #8b949e;
+        margin-bottom: 20px;
+    }
+    .agy-card {
+        background-color: #0d1117;
+        border: 1px solid #30363d;
+        border-radius: 10px;
+        padding: 16px 20px;
+        margin-bottom: 14px;
+    }
+    .agy-card-header {
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: #f0f6fc;
+        margin-bottom: 4px;
+    }
+    .agy-card-desc {
+        font-size: 0.82rem;
+        color: #8b949e;
+    }
+    .agy-quota-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 0;
+        border-bottom: 1px solid #21262d;
+    }
+    .agy-quota-row:last-child {
+        border-bottom: none;
+    }
+    .agy-quota-label {
+        font-size: 0.92rem;
+        font-weight: 600;
+        color: #f0f6fc;
+    }
+    .agy-quota-sub {
+        font-size: 0.8rem;
+        color: #8b949e;
+        margin-top: 2px;
+    }
+    .agy-badge-pct {
+        font-size: 1.15rem;
+        font-weight: 700;
+        color: #22c55e;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # ── Sidebar ──
-st.sidebar.title("🤖 Gemini Quota Monitor")
-st.sidebar.caption("Google AI Studio 配額與速率限制即時監控系統")
+st.sidebar.title("🤖 Quota & Rate Monitor")
+st.sidebar.caption("Google AI Studio & Antigravity IDE 雙軌配額監控")
 
 # 帳號選擇器 (支援多帳號獨立追蹤)
 available_accounts = get_available_accounts()
@@ -193,6 +260,7 @@ st.sidebar.code(str(DB_PATH), language="bash")
 # ── Fetch Data ──
 stats = get_stats_summary(account_name=filter_account_name)
 rate_status_list, has_exceeded = get_rate_limits_status(account_name=filter_account_name)
+agy_quota = get_antigravity_quota()
 
 def load_data():
     if not DB_PATH.exists():
@@ -209,94 +277,209 @@ def load_data():
 df = load_data()
 
 # ═══════════════════════════════════════════════════════════════
-# 1. Google AI Studio 頂部 Rate Limit 與警示區塊
+# 1. 頂部導覽切換 (Google AI Studio Rate Limits vs Antigravity IDE)
 # ═══════════════════════════════════════════════════════════════
 
-st.markdown("""
-<div class="rate-limit-header">
-    <span class="rate-limit-title">Gemini API Rate Limit</span>
-    <span class="tier-badge">● Free tier</span>
-</div>
-""", unsafe_allow_html=True)
+view_mode = st.radio(
+    "選擇主要檢視模組",
+    ["📊 Google AI Studio (10 款模型速率限制)", "🛸 Antigravity IDE (Models & Usage 配額追蹤)"],
+    horizontal=True
+)
 
-# 若有超額，顯示與 Google AI Studio 一模一樣的紅色警示橫幅
-if has_exceeded or stats['today_429_count'] > 0:
+if view_mode == "🛸 Antigravity IDE (Models & Usage 配額追蹤)":
+    # ── Antigravity IDE Models & Usage 鏡像介面 ──
     st.markdown("""
-    <div class="alert-banner">
-        <span>🚫</span>
+    <div class="agy-container">
+        <div class="agy-title">Models & Usage <span style="font-size:1rem;color:#8b949e;cursor:pointer;">🔄</span></div>
+        <div class="agy-subtitle">Manage your model quota and credits.</div>
+    """, unsafe_allow_html=True)
+
+    # 1. Plan Card
+    st.markdown("""
+    <div class="agy-card" style="display:flex;justify-content:space-between;align-items:center;">
         <div>
-            <strong>You have reached a rate limit.</strong> Set up billing to increase your limits and unblock your work.<br>
-            <span style="font-size:0.82rem;opacity:0.9;">提示：您已達到免費層每日請求上限 (20 RPD) 或每分鐘速率限制 (5 RPM)。建議自動輪替 API 金鑰或切換至 <strong>Flash Lite (500 RPD / 15 RPM)</strong>。</span>
+            <div class="agy-card-header">Your Plan: Google AI Pro</div>
+            <div class="agy-card-desc">You can upgrade to a Google AI Ultra plan to receive higher rate limits.</div>
+        </div>
+        <div>
+            <span style="background-color:#1d4ed8;color:#ffffff;padding:6px 14px;border-radius:6px;font-size:0.85rem;font-weight:600;">Upgrade</span>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
-# ═══════════════════════════════════════════════════════════════
-# 2. Rate limits by model 實時表格 (比照 Google AI Studio 視覺)
-# ═══════════════════════════════════════════════════════════════
+    # 2. Model Credits
+    st.markdown("""
+    <div class="agy-card" style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+            <div class="agy-card-header">Enable AI Credit Overages</div>
+            <div class="agy-card-desc">When toggled on, Antigravity IDE will use your AI credits to fulfill model requests once you're out of model quota. Antigravity IDE will always use your model quota first before using AI credits.</div>
+        </div>
+        <div style="padding-left:16px;">
+            <span style="color:#64748b;font-size:1.4rem;">⚪</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-st.markdown("""
-<div class="rate-table-container">
-    <div class="rate-table-header">Rate limits by model</div>
-    <div class="rate-table-sub">Peak usage per model compared to its limit (追蹤帳號: <strong>{}</strong>)</div>
-""".format(selected_account), unsafe_allow_html=True)
+    # 3. Gemini Models Section
+    st.markdown("<div style='font-size:0.95rem;font-weight:600;color:#f0f6fc;margin:16px 0 8px 0'>Gemini Models ⓘ</div>", unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="agy-card">
+        <div class="agy-quota-row">
+            <div>
+                <div class="agy-quota-label">Weekly Limit Remaining</div>
+                <div class="agy-quota-sub">You have used some of your weekly limit, it will fully refresh in {agy_quota['gemini_weekly_desc']}.</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <span class="agy-badge-pct">{agy_quota['gemini_weekly_pct']:.0f}%</span>
+                <span style="color:#22c55e;font-size:1.3rem;">🟢</span>
+            </div>
+        </div>
+        <div class="agy-quota-row">
+            <div>
+                <div class="agy-quota-label">Five Hour Limit Remaining</div>
+                <div class="agy-quota-sub">You have used some of your 5-hour limit, it will fully refresh in {agy_quota['gemini_5hr_desc']}.</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <span class="agy-badge-pct">{agy_quota['gemini_5hr_pct']:.0f}%</span>
+                <span style="color:#22c55e;font-size:1.3rem;">🟢</span>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-# 表頭
-h_c1, h_c2, h_c3, h_c4, h_c5, h_c6 = st.columns([2.2, 1.6, 2.0, 2.2, 2.0, 1.4])
-with h_c1: st.markdown("<span style='color:#8b949e;font-size:0.85rem;font-weight:600'>Model</span>", unsafe_allow_html=True)
-with h_c2: st.markdown("<span style='color:#8b949e;font-size:0.85rem;font-weight:600'>Category</span>", unsafe_allow_html=True)
-with h_c3: st.markdown("<span style='color:#8b949e;font-size:0.85rem;font-weight:600'>RPM (Req/min)</span>", unsafe_allow_html=True)
-with h_c4: st.markdown("<span style='color:#8b949e;font-size:0.85rem;font-weight:600'>TPM (Tokens/min)</span>", unsafe_allow_html=True)
-with h_c5: st.markdown("<span style='color:#8b949e;font-size:0.85rem;font-weight:600'>RPD (Req/day)</span>", unsafe_allow_html=True)
-with h_c6: st.markdown("<span style='color:#8b949e;font-size:0.85rem;font-weight:600'>Status</span>", unsafe_allow_html=True)
+    # 4. Claude and GPT models Section
+    st.markdown("<div style='font-size:0.95rem;font-weight:600;color:#f0f6fc;margin:16px 0 8px 0'>Claude and GPT models ⓘ</div>", unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="agy-card">
+        <div class="agy-quota-row">
+            <div>
+                <div class="agy-quota-label">Weekly Limit Remaining</div>
+                <div class="agy-quota-sub">All weekly limits for Claude and GPT models are available.</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <span class="agy-badge-pct" style="color:#22c55e;">{agy_quota['claude_gpt_weekly_pct']:.0f}%</span>
+                <span style="color:#22c55e;font-size:1.3rem;">🟢</span>
+            </div>
+        </div>
+        <div class="agy-quota-row">
+            <div>
+                <div class="agy-quota-label">Five Hour Limit Remaining</div>
+                <div class="agy-quota-sub">All 5-hour limits for Claude and GPT models are available.</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <span class="agy-badge-pct" style="color:#22c55e;">{agy_quota['claude_gpt_5hr_pct']:.0f}%</span>
+                <span style="color:#22c55e;font-size:1.3rem;">🟢</span>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-st.markdown("<hr style='border-color:#30363d;margin:6px 0 12px 0'>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-# 依序呈現各模型數據
-for item in rate_status_list:
-    r_c1, r_c2, r_c3, r_c4, r_c5, r_c6 = st.columns([2.2, 1.6, 2.0, 2.2, 2.0, 1.4])
-    
-    # 判斷顏色 class
-    rpm_color_cls = "progress-fill-exceeded" if item['current_rpm'] >= item['max_rpm'] else ("progress-fill-warning" if item['rpm_pct'] >= 80 else "progress-fill-normal")
-    rpd_color_cls = "progress-fill-exceeded" if item['current_rpd'] >= item['max_rpd'] else ("progress-fill-warning" if item['rpd_pct'] >= 80 else "progress-fill-normal")
-    tpm_color_cls = "progress-fill-exceeded" if item['current_tpm'] >= item['max_tpm'] else "progress-fill-normal"
+    # ── 校準控制台 ──
+    with st.expander("🛠️ 校準 Antigravity 配額數值與重置時間 (Calibration)"):
+        st.caption("說明：您可在此隨時將 Antigravity IDE 畫面中的最新剩餘百分比與時間同步寫入系統，系統將自動接續倒數計算。")
+        cal_col1, cal_col2 = st.columns(2)
+        with cal_col1:
+            cal_w_pct = st.number_input("Gemini 每週剩餘百分比 (%)", min_value=0.0, max_value=100.0, value=float(agy_quota['gemini_weekly_pct']), step=1.0)
+            cal_w_hrs = st.number_input("Gemini 每週重置剩餘小時數 (預設 47 小時 = 1天23小時)", min_value=0.0, max_value=168.0, value=47.0, step=1.0)
+        with cal_col2:
+            cal_h_pct = st.number_input("Gemini 5 小時剩餘百分比 (%)", min_value=0.0, max_value=100.0, value=float(agy_quota['gemini_5hr_pct']), step=1.0)
+            cal_h_mins = st.number_input("Gemini 5 小時重置剩餘分鐘數 (預設 264 分 = 4小時24分)", min_value=0.0, max_value=300.0, value=264.0, step=1.0)
 
-    rpm_text_color = "#ef4444" if item['current_rpm'] >= item['max_rpm'] else "#f0f6fc"
-    rpd_text_color = "#ef4444" if item['current_rpd'] >= item['max_rpd'] else "#f0f6fc"
+        if st.button("💾 儲存並更新 Antigravity 配額狀態", type="primary", use_container_width=True):
+            update_antigravity_quota(
+                gemini_weekly_pct=cal_w_pct,
+                gemini_weekly_hours=cal_w_hrs,
+                gemini_5hr_pct=cal_h_pct,
+                gemini_5hr_mins=cal_h_mins
+            )
+            st.success("✅ Antigravity 配額狀態已成功校準更新！")
+            st.rerun()
 
-    tpm_display = f"{item['current_tpm'] / 1000:.2f}K" if item['current_tpm'] >= 1000 else f"{item['current_tpm']}"
-    max_tpm_display = f"{item['max_tpm'] / 1000:.0f}K"
+else:
+    # ── Google AI Studio 10 款模型速率限制面板 ──
+    st.markdown("""
+    <div class="rate-limit-header">
+        <span class="rate-limit-title">Gemini API Rate Limit</span>
+        <span class="tier-badge">● Free tier</span>
+    </div>
+    """, unsafe_allow_html=True)
 
-    status_badge = "🔴 已達上限" if item['is_exceeded'] else ("🟡 接近上限" if item['rpd_pct'] >= 80 else "🟢 正常")
-
-    with r_c1:
-        st.markdown(f"<span style='font-weight:600;color:#f0f6fc;font-size:0.92rem'>{item['displayName']}</span>", unsafe_allow_html=True)
-    with r_c2:
-        st.markdown(f"<span style='color:#8b949e;font-size:0.85rem'>{item['category']}</span>", unsafe_allow_html=True)
-    with r_c3:
-        st.markdown(f"""
-        <div style='font-size:0.85rem;color:{rpm_text_color};font-weight:600'>{item['current_rpm']} / {item['max_rpm']}</div>
-        <div class="progress-track"><div class="{rpm_color_cls}" style="width:{item['rpm_pct']}%"></div></div>
+    # 若有超額，顯示紅色警示橫幅
+    if has_exceeded or stats['today_429_count'] > 0:
+        st.markdown("""
+        <div class="alert-banner">
+            <span>🚫</span>
+            <div>
+                <strong>You have reached a rate limit.</strong> Set up billing to increase your limits and unblock your work.<br>
+                <span style="font-size:0.82rem;opacity:0.9;">提示：您已達到免費層每日請求上限 (20 RPD) 或每分鐘速率限制 (5 RPM)。建議自動輪替 API 金鑰或切換至 <strong>Flash Lite (500 RPD / 15 RPM)</strong>。</span>
+            </div>
+        </div>
         """, unsafe_allow_html=True)
-    with r_c4:
-        st.markdown(f"""
-        <div style='font-size:0.85rem;color:#f0f6fc;font-weight:600'>{tpm_display} / {max_tpm_display}</div>
-        <div class="progress-track"><div class="{tpm_color_cls}" style="width:{item['tpm_pct']}%"></div></div>
-        """, unsafe_allow_html=True)
-    with r_c5:
-        st.markdown(f"""
-        <div style='font-size:0.85rem;color:{rpd_text_color};font-weight:600'>{item['current_rpd']} / {item['max_rpd']}</div>
-        <div class="progress-track"><div class="{rpd_color_cls}" style="width:{item['rpd_pct']}%"></div></div>
-        """, unsafe_allow_html=True)
-    with r_c6:
-        st.markdown(f"<span style='font-size:0.82rem'>{status_badge}</span>", unsafe_allow_html=True)
-    
-    st.markdown("<div style='margin-bottom:8px'></div>", unsafe_allow_html=True)
 
-st.markdown("</div>", unsafe_allow_html=True)
+    # 10 款模型速率限制實時表格
+    st.markdown("""
+    <div class="rate-table-container">
+        <div class="rate-table-header">Rate limits by model (10 款模型全覆蓋)</div>
+        <div class="rate-table-sub">Peak usage per model compared to its limit (追蹤帳號: <strong>{}</strong>)</div>
+    """.format(selected_account), unsafe_allow_html=True)
+
+    # 表頭
+    h_c1, h_c2, h_c3, h_c4, h_c5, h_c6 = st.columns([2.4, 1.5, 1.8, 1.8, 1.8, 1.2])
+    with h_c1: st.markdown("<span style='color:#8b949e;font-size:0.85rem;font-weight:600'>Model</span>", unsafe_allow_html=True)
+    with h_c2: st.markdown("<span style='color:#8b949e;font-size:0.85rem;font-weight:600'>Category</span>", unsafe_allow_html=True)
+    with h_c3: st.markdown("<span style='color:#8b949e;font-size:0.85rem;font-weight:600'>RPM (Req/min)</span>", unsafe_allow_html=True)
+    with h_c4: st.markdown("<span style='color:#8b949e;font-size:0.85rem;font-weight:600'>TPM (Tokens/min)</span>", unsafe_allow_html=True)
+    with h_c5: st.markdown("<span style='color:#8b949e;font-size:0.85rem;font-weight:600'>RPD (Req/day)</span>", unsafe_allow_html=True)
+    with h_c6: st.markdown("<span style='color:#8b949e;font-size:0.85rem;font-weight:600'>Status</span>", unsafe_allow_html=True)
+
+    st.markdown("<hr style='border-color:#30363d;margin:6px 0 12px 0'>", unsafe_allow_html=True)
+
+    # 依序呈現 10 款模型數據
+    for item in rate_status_list:
+        r_c1, r_c2, r_c3, r_c4, r_c5, r_c6 = st.columns([2.4, 1.5, 1.8, 1.8, 1.8, 1.2])
+        
+        rpm_color_cls = "progress-fill-exceeded" if item['current_rpm'] >= item['max_rpm'] else ("progress-fill-warning" if item['rpm_pct'] >= 80 else "progress-fill-normal")
+        rpd_color_cls = "progress-fill-exceeded" if item['current_rpd'] >= item['max_rpd'] else ("progress-fill-warning" if item['rpd_pct'] >= 80 else "progress-fill-normal")
+        tpm_color_cls = "progress-fill-exceeded" if item['current_tpm'] >= item['max_tpm'] else "progress-fill-normal"
+
+        rpm_text_color = "#ef4444" if item['current_rpm'] >= item['max_rpm'] else "#f0f6fc"
+        rpd_text_color = "#ef4444" if item['current_rpd'] >= item['max_rpd'] else "#f0f6fc"
+
+        tpm_display = f"{item['current_tpm'] / 1000:.2f}K" if item['current_tpm'] >= 1000 else f"{item['current_tpm']}"
+        max_tpm_display = f"{item['max_tpm'] / 1000:.0f}K"
+
+        status_badge = "🔴 已達上限" if item['is_exceeded'] else ("🟡 接近上限" if item['rpd_pct'] >= 80 else "🟢 正常")
+
+        with r_c1:
+            st.markdown(f"<span style='font-weight:600;color:#f0f6fc;font-size:0.90rem'>{item['displayName']}</span>", unsafe_allow_html=True)
+        with r_c2:
+            st.markdown(f"<span style='color:#8b949e;font-size:0.83rem'>{item['category']}</span>", unsafe_allow_html=True)
+        with r_c3:
+            st.markdown(f"""
+            <div style='font-size:0.83rem;color:{rpm_text_color};font-weight:600'>{item['current_rpm']} / {item['max_rpm']}</div>
+            <div class="progress-track"><div class="{rpm_color_cls}" style="width:{item['rpm_pct']}%"></div></div>
+            """, unsafe_allow_html=True)
+        with r_c4:
+            st.markdown(f"""
+            <div style='font-size:0.83rem;color:#f0f6fc;font-weight:600'>{tpm_display} / {max_tpm_display}</div>
+            <div class="progress-track"><div class="{tpm_color_cls}" style="width:{item['tpm_pct']}%"></div></div>
+            """, unsafe_allow_html=True)
+        with r_c5:
+            st.markdown(f"""
+            <div style='font-size:0.83rem;color:{rpd_text_color};font-weight:600'>{item['current_rpd']} / {item['max_rpd']}</div>
+            <div class="progress-track"><div class="{rpd_color_cls}" style="width:{item['rpd_pct']}%"></div></div>
+            """, unsafe_allow_html=True)
+        with r_c6:
+            st.markdown(f"<span style='font-size:0.80rem'>{status_badge}</span>", unsafe_allow_html=True)
+        
+        st.markdown("<div style='margin-bottom:6px'></div>", unsafe_allow_html=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════
-# 3. 核心指標卡片 (Metric Cards)
+# 2. 核心指標卡片 (Metric Cards)
 # ═══════════════════════════════════════════════════════════════
 
 col1, col2, col3, col4 = st.columns(4)
@@ -341,7 +524,7 @@ with col4:
 st.markdown("<br>", unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════
-# 4. 主分頁區塊 (Main Tabs)
+# 3. 主分頁區塊 (Main Tabs)
 # ═══════════════════════════════════════════════════════════════
 
 tab1, tab2, tab3, tab4 = st.tabs(["📈 用量與費用趨勢", "🤖 模型與帳號分析", "📋 API 呼叫日誌", "⚡ Live 探針測試"])
