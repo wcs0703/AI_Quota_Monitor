@@ -22,8 +22,10 @@ from gemini_logger import (
     get_recent_logs,
     get_available_accounts,
     get_rate_limits_status,
+    get_antigravity_accounts,
     get_antigravity_quota,
     update_antigravity_quota,
+    get_deepl_usage,
     log_api_call,
     generate_mock_data
 )
@@ -282,23 +284,38 @@ df = load_data()
 
 view_mode = st.radio(
     "選擇主要檢視模組",
-    ["📊 Google AI Studio (10 款模型速率限制)", "🛸 Antigravity IDE (Models & Usage 配額追蹤)"],
+    [
+        "📊 Google AI Studio (10 款模型速率限制)",
+        "🛸 Antigravity IDE (Models & Usage 配額追蹤)",
+        "🌐 DeepL API (翻譯字數配額監控)"
+    ],
     horizontal=True
 )
 
 if view_mode == "🛸 Antigravity IDE (Models & Usage 配額追蹤)":
+    # ── 多帳號選擇器 ──
+    agy_accounts = get_antigravity_accounts()
+    col_sel1, col_sel2 = st.columns([3, 1])
+    with col_sel1:
+        selected_agy_acc = st.radio("👤 切換 Google 帳號配額", agy_accounts, horizontal=True, key="agy_acc_radio")
+    with col_sel2:
+        st.markdown("<div style='padding-top:25px;'></div>", unsafe_allow_html=True)
+        # 取得當前選擇帳號的配額數據
+        agy_quota = get_antigravity_quota(selected_agy_acc)
+
     # ── Antigravity IDE Models & Usage 鏡像介面 ──
-    st.markdown("""
+    st.markdown(f"""
     <div class="agy-container">
-        <div class="agy-title">Models & Usage <span style="font-size:1rem;color:#8b949e;cursor:pointer;">🔄</span></div>
-        <div class="agy-subtitle">Manage your model quota and credits.</div>
+        <div class="agy-title">Models & Usage — <span style="color:#58a6ff;font-size:1.1rem;">{selected_agy_acc}</span> <span style="font-size:1rem;color:#8b949e;cursor:pointer;">🔄</span></div>
+        <div class="agy-subtitle">Manage your model quota and credits for {selected_agy_acc}.</div>
     """, unsafe_allow_html=True)
 
     # 1. Plan Card
-    st.markdown("""
+    plan_display = agy_quota.get('plan_name', 'Google AI Pro')
+    st.markdown(f"""
     <div class="agy-card" style="display:flex;justify-content:space-between;align-items:center;">
         <div>
-            <div class="agy-card-header">Your Plan: Google AI Pro</div>
+            <div class="agy-card-header">Your Plan: {plan_display}</div>
             <div class="agy-card-desc">You can upgrade to a Google AI Ultra plan to receive higher rate limits.</div>
         </div>
         <div>
@@ -377,25 +394,125 @@ if view_mode == "🛸 Antigravity IDE (Models & Usage 配額追蹤)":
     st.markdown("</div>", unsafe_allow_html=True)
 
     # ── 校準控制台 ──
-    with st.expander("🛠️ 校準 Antigravity 配額數值與重置時間 (Calibration)"):
-        st.caption("說明：您可在此隨時將 Antigravity IDE 畫面中的最新剩餘百分比與時間同步寫入系統，系統將自動接續倒數計算。")
+    with st.expander(f"🛠️ 校準 【{selected_agy_acc}】 配額數值與重置時間 (Calibration)"):
+        st.caption(f"說明：您可在此隨時將 {selected_agy_acc} 在 Antigravity IDE 畫面中的最新剩餘百分比與時間同步寫入系統，系統將自動接續倒數計算。")
         cal_col1, cal_col2 = st.columns(2)
         with cal_col1:
-            cal_w_pct = st.number_input("Gemini 每週剩餘百分比 (%)", min_value=0.0, max_value=100.0, value=float(agy_quota['gemini_weekly_pct']), step=1.0)
-            cal_w_hrs = st.number_input("Gemini 每週重置剩餘小時數 (預設 47 小時 = 1天23小時)", min_value=0.0, max_value=168.0, value=47.0, step=1.0)
+            cal_plan = st.selectbox("方案類型", ["Google AI Pro", "Google AI Ultra", "Google AI Free Tier"], index=0 if agy_quota.get('plan_name') == 'Google AI Pro' else 1)
+            cal_w_pct = st.number_input("Gemini 每週剩餘百分比 (%)", min_value=0.0, max_value=100.0, value=float(agy_quota['gemini_weekly_pct']), step=1.0, key="cal_w_pct")
+            cal_w_hrs = st.number_input("Gemini 每週重置剩餘小時數 (例如 47 小時 = 1天23小時)", min_value=0.0, max_value=168.0, value=47.0, step=1.0, key="cal_w_hrs")
         with cal_col2:
-            cal_h_pct = st.number_input("Gemini 5 小時剩餘百分比 (%)", min_value=0.0, max_value=100.0, value=float(agy_quota['gemini_5hr_pct']), step=1.0)
-            cal_h_mins = st.number_input("Gemini 5 小時重置剩餘分鐘數 (預設 264 分 = 4小時24分)", min_value=0.0, max_value=300.0, value=264.0, step=1.0)
+            st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
+            cal_h_pct = st.number_input("Gemini 5 小時剩餘百分比 (%)", min_value=0.0, max_value=100.0, value=float(agy_quota['gemini_5hr_pct']), step=1.0, key="cal_h_pct")
+            cal_h_mins = st.number_input("Gemini 5 小時重置剩餘分鐘數 (例如 239 分 = 3小時59分)", min_value=0.0, max_value=300.0, value=239.0, step=1.0, key="cal_h_mins")
 
-        if st.button("💾 儲存並更新 Antigravity 配額狀態", type="primary", use_container_width=True):
+        if st.button(f"💾 儲存並更新 【{selected_agy_acc}】 配額狀態", type="primary", use_container_width=True):
             update_antigravity_quota(
+                account_name=selected_agy_acc,
                 gemini_weekly_pct=cal_w_pct,
                 gemini_weekly_hours=cal_w_hrs,
                 gemini_5hr_pct=cal_h_pct,
-                gemini_5hr_mins=cal_h_mins
+                gemini_5hr_mins=cal_h_mins,
+                plan_name=cal_plan
             )
-            st.success("✅ Antigravity 配額狀態已成功校準更新！")
+            st.success(f"✅ 【{selected_agy_acc}】 配額狀態已成功校準更新！")
             st.rerun()
+
+elif view_mode == "🌐 DeepL API (翻譯字數配額監控)":
+    # ── DeepL API 翻譯字數監控介面 ──
+    deepl_info = get_deepl_usage()
+    
+    st.markdown("""
+    <div class="agy-container">
+        <div class="agy-title">DeepL Translation Quota <span style="font-size:1rem;color:#8b949e;cursor:pointer;">🔄</span></div>
+        <div class="agy-subtitle">即時監控 DeepL API 翻譯字數消耗、每月配額上限與剩餘額度。</div>
+    """, unsafe_allow_html=True)
+    
+    # 1. 方案卡片
+    st.markdown(f"""
+    <div class="agy-card" style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+            <div class="agy-card-header">DeepL 方案狀態: {deepl_info['tier']}</div>
+            <div class="agy-card-desc">連線狀態: {deepl_info['status_msg']}</div>
+        </div>
+        <div>
+            <span style="background-color:#0f766e;color:#ffffff;padding:6px 14px;border-radius:6px;font-size:0.85rem;font-weight:600;">DeepL API</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # 2. 字數統計指標卡片
+    d_col1, d_col2, d_col3, d_col4 = st.columns(4)
+    with d_col1:
+        st.metric("本月已翻譯字數", f"{deepl_info['character_count']:,} 字")
+    with d_col2:
+        st.metric("每月字數上限", f"{deepl_info['character_limit']:,} 字")
+    with d_col3:
+        st.metric("剩餘可用字數", f"{deepl_info['remaining_chars']:,} 字")
+    with d_col4:
+        st.metric("字數消耗比例", f"{deepl_info['usage_pct']:.2f}%")
+        
+    # 3. 進度條視覺化
+    st.markdown("<div style='font-size:0.95rem;font-weight:600;color:#f0f6fc;margin:16px 0 8px 0'>字數額度消耗進度條</div>", unsafe_allow_html=True)
+    progress_val = min(1.0, max(0.0, deepl_info['usage_pct'] / 100.0))
+    st.progress(progress_val)
+    
+    if deepl_info['usage_pct'] > 90:
+        st.error(f"⚠️ 警告：DeepL 翻譯額度已使用 {deepl_info['usage_pct']}%，即將達到上限！")
+    elif deepl_info['usage_pct'] > 75:
+        st.warning(f"⚡ 提醒：DeepL 翻譯額度已使用 {deepl_info['usage_pct']}%。")
+        
+    st.markdown("</div>", unsafe_allow_html=True)
+    
+    # 4. 即時 DeepL 測試翻譯探針
+    with st.expander("⚡ 即時 DeepL 翻譯測試探針 (Live Translation Probe)"):
+        st.caption("說明：直接在下方輸入日文或英文文字發送翻譯請求，即時測試 DeepL API 回應速度並即時扣減刷新字數。")
+        t_col1, t_col2 = st.columns([3, 1])
+        with t_col1:
+            sample_text = st.text_area("待翻譯文字 (日文/英文)", value="人工知能と機械学習を活用して、音声認識とリアルタイム翻訳の精度を向上させます。")
+        with t_col2:
+            target_lang = st.selectbox("目標語言", ["ZH-HANT (繁體中文)", "ZH (簡體/繁體中文)", "EN-US (美式英文)", "JA (日文)"])
+            deepl_test_key = st.text_input("DeepL Auth Key (自動載入)", value=os.getenv("DEEPL_API_KEY", ""), type="password")
+            
+        if st.button("🚀 發送 DeepL 即時翻譯測試", type="primary", use_container_width=True):
+            if not deepl_test_key.strip():
+                st.error("❌ 請先在 .env 中填寫 DEEPL_API_KEY 或在上方輸入金鑰！")
+            else:
+                import urllib.parse
+                import urllib.request
+                import json
+                import time
+                t_start = time.time()
+                is_free_key = deepl_test_key.strip().endswith(":fx")
+                trans_url = "https://api-free.deepl.com/v2/translate" if is_free_key else "https://api.deepl.com/v2/translate"
+                t_lang_code = target_lang.split(" ")[0]
+                
+                try:
+                    payload = urllib.parse.urlencode({
+                        "text": sample_text,
+                        "target_lang": t_lang_code
+                    }).encode("utf-8")
+                    req = urllib.request.Request(
+                        trans_url,
+                        data=payload,
+                        headers={
+                            "Authorization": f"DeepL-Auth-Key {deepl_test_key.strip()}",
+                            "Content-Type": "application/x-www-form-urlencoded"
+                        }
+                    )
+                    with urllib.request.urlopen(req, timeout=10) as resp:
+                        res_json = json.loads(resp.read().decode("utf-8"))
+                        t_latency = round((time.time() - t_start) * 1000, 1)
+                        translated_text = res_json["translations"][0]["text"]
+                        detected_lang = res_json["translations"][0].get("detected_source_language", "AUTO")
+                        
+                        st.success(f"✅ 翻譯成功！(耗時: {t_latency}ms | 消耗字數: {len(sample_text)} 字)")
+                        st.markdown(f"**偵測語言**: `{detected_lang}` ➔ **目標語言**: `{t_lang_code}`")
+                        st.text_area("翻譯結果", value=translated_text, height=100)
+                        time.sleep(0.5)
+                        st.rerun()
+                except Exception as ex:
+                    st.error(f"❌ DeepL 翻譯失敗: {ex}")
 
 else:
     # ── Google AI Studio 10 款模型速率限制面板 ──
@@ -667,7 +784,9 @@ with tab4:
     probe_accounts = {
         "Whisper_correction (金鑰 1)": os.getenv("Whisper_correction", ""),
         "Whiskey_correction (金鑰 2)": os.getenv("Whiskey_correction", ""),
-        "GEMINI_API_KEY / 預設 (金鑰 3)": os.getenv("GEMINI_API_KEY", "") or os.getenv("GOOGLE_API_KEY", "")
+        "GEMINI_API_KEY_3 (金鑰 3)": os.getenv("GEMINI_API_KEY_3", ""),
+        "GEMINI_API_KEY (通用金鑰)": os.getenv("GEMINI_API_KEY", ""),
+        "JAV_Translate (日語翻譯金鑰)": os.getenv("JAV_Translate", "") or os.getenv("GOOGLE_API_KEY", "")
     }
 
     col_p1, col_p2 = st.columns(2)

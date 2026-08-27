@@ -10,8 +10,10 @@ echo "════════════════════════�
 echo "🛡️  正在啟動 Gemini Model Quota 守護維持系統"
 echo "══════════════════════════════════════════════════"
 
-if [ -f "$VENV_PYTHON" ]; then
-    PYTHON_CMD="$VENV_PYTHON"
+if [ -f "$WORKSPACE_DIR/.venv/bin/python" ]; then
+    PYTHON_CMD="$WORKSPACE_DIR/.venv/bin/python"
+elif [ -f "$WORKSPACE_DIR/.venv/Scripts/python.exe" ]; then
+    PYTHON_CMD="$WORKSPACE_DIR/.venv/Scripts/python.exe"
 elif command -v python3 &>/dev/null; then
     PYTHON_CMD="python3"
 else
