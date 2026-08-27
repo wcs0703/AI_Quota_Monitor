@@ -288,15 +288,40 @@ def log_gemini_response(response: Any, model_name: str, start_time: float, calle
 
 # --- Database Query Helpers ---
 def get_available_accounts() -> list:
-    """取得資料庫中已記錄的所有帳號名稱"""
+    """取得所有帳號名稱（結合 .env 中的金鑰名稱與資料庫記錄）"""
+    accounts = []
+    # 1. 檢查 .env
+    for var in ["Whisper_correction", "Whiskey_correction", "GEMINI_API_KEY_3", "GEMINI_API_KEY", "GOOGLE_API_KEY"]:
+        if os.getenv(var):
+            if var not in accounts:
+                accounts.append(var)
+    # 2. 檢查資料庫
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT DISTINCT account_name FROM usage_logs WHERE account_name IS NOT NULL AND account_name != ''")
-        rows = cursor.fetchall()
-        accounts = [r[0] for r in rows]
-        if not accounts:
-            accounts = ["預設帳號"]
-        return accounts
+        for r in cursor.fetchall():
+            if r[0] not in accounts:
+                accounts.append(r[0])
+    if not accounts:
+        accounts = ["預設帳號"]
+    return accounts
+
+def get_all_accounts_overview() -> list:
+    """傳回所有帳號今日用量、Token、花費與 429 狀態總覽矩陣"""
+    accounts = get_available_accounts()
+    overview = []
+    for acc in accounts:
+        st = get_stats_summary(account_name=acc)
+        overview.append({
+            "account_name": acc,
+            "today_calls": st["today_calls"],
+            "today_tokens": st["today_total_tokens"],
+            "today_cost": st["today_cost"],
+            "today_429": st["today_429_count"],
+            "today_errors": st["today_errors"],
+            "status": "🔴 429 限制" if st["today_429_count"] > 0 else "🟢 正常"
+        })
+    return overview
 
 def get_recent_logs(limit: int = 100, account_name: Optional[str] = None):
     with sqlite3.connect(DB_PATH) as conn:

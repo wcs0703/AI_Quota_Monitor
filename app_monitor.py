@@ -21,6 +21,7 @@ from gemini_logger import (
     get_stats_summary,
     get_recent_logs,
     get_available_accounts,
+    get_all_accounts_overview,
     get_rate_limits_status,
     get_antigravity_quota,
     update_antigravity_quota,
@@ -46,6 +47,37 @@ st.markdown("""
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
     
+    /* 帳號狀態卡片 */
+    .account-card {
+        background-color: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 10px;
+        padding: 14px 18px;
+        margin-bottom: 12px;
+    }
+    .account-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+    }
+    .account-card-title {
+        font-size: 0.95rem;
+        font-weight: 700;
+        color: #f0f6fc;
+    }
+    .account-metric-row {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.82rem;
+        color: #8b949e;
+        margin-top: 4px;
+    }
+    .account-metric-val {
+        font-weight: 600;
+        color: #38bdf8;
+    }
+
     /* 速率限制頂部區域 */
     .rate-limit-header {
         display: flex;
@@ -226,10 +258,10 @@ st.markdown("""
 st.sidebar.title("🤖 Quota & Rate Monitor")
 st.sidebar.caption("Google AI Studio & Antigravity IDE 雙軌配額監控")
 
-# 帳號選擇器 (支援多帳號獨立追蹤)
+# 帳號選擇器 (支援多帳號獨立切換)
 available_accounts = get_available_accounts()
 active_account_options = ["全部帳號 (All Accounts)"] + [a for a in available_accounts if a != "全部帳號"]
-selected_account = st.sidebar.selectbox("🧑‍💼 選擇追蹤帳號 (Project/Key)", active_account_options)
+selected_account = st.sidebar.selectbox("🧑‍💼 選擇獨立追蹤帳號 (Project/Key)", active_account_options)
 filter_account_name = None if "全部帳號" in selected_account else selected_account
 
 time_range_choice = st.sidebar.selectbox("⏳ 時間範圍 (Time Range)", ["今日 (Today)", "近 7 天 (7 Days)", "近 28 天 (28 Days)"])
@@ -241,12 +273,12 @@ if auto_refresh:
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("🛠️ 工具與維護")
-if st.sidebar.button("🎲 產生測試模擬數據 (Seed Mock Data)", use_container_width=True):
+if st.sidebar.button("🎲 產生測試模擬數據 (Seed Mock Data)", width="stretch"):
     generate_mock_data(15)
     st.sidebar.success("已成功產生 15 筆測試日誌數據！")
     st.rerun()
 
-if st.sidebar.button("🗑️ 清空所有記錄檔", use_container_width=True):
+if st.sidebar.button("🗑️ 清空所有記錄檔", width="stretch"):
     with sqlite3.connect(DB_PATH) as conn:
         conn.cursor().execute("DELETE FROM usage_logs")
         conn.commit()
@@ -261,6 +293,7 @@ st.sidebar.code(str(DB_PATH), language="bash")
 stats = get_stats_summary(account_name=filter_account_name)
 rate_status_list, has_exceeded = get_rate_limits_status(account_name=filter_account_name)
 agy_quota = get_antigravity_quota()
+accounts_overview = get_all_accounts_overview()
 
 def load_data():
     if not DB_PATH.exists():
@@ -277,7 +310,45 @@ def load_data():
 df = load_data()
 
 # ═══════════════════════════════════════════════════════════════
-# 1. 頂部導覽切換 (Google AI Studio Rate Limits vs Antigravity IDE)
+# 1. 🧑‍💼 各帳號即時狀態總覽橫向矩陣 (Multi-Account Status Grid)
+# ═══════════════════════════════════════════════════════════════
+
+st.markdown("<div style='font-size:1.15rem;font-weight:700;color:#f0f6fc;margin-bottom:10px'>🧑‍💼 3 組帳號即時狀態對比矩陣 (Multi-Account Overview)</div>", unsafe_allow_html=True)
+
+acc_cols = st.columns(len(accounts_overview))
+for idx, acc_info in enumerate(accounts_overview):
+    with acc_cols[idx]:
+        is_current = (filter_account_name == acc_info['account_name']) or (filter_account_name is None and "全部帳號" in selected_account)
+        border_color = "#38bdf8" if filter_account_name == acc_info['account_name'] else "#30363d"
+        st.markdown(f"""
+        <div class="account-card" style="border-color:{border_color}">
+            <div class="account-card-header">
+                <span class="account-card-title">🔑 {acc_info['account_name']}</span>
+                <span>{acc_info['status']}</span>
+            </div>
+            <div class="account-metric-row">
+                <span>今日請求次數:</span>
+                <span class="account-metric-val">{acc_info['today_calls']} 次</span>
+            </div>
+            <div class="account-metric-row">
+                <span>今日 Token 用量:</span>
+                <span class="account-metric-val">{acc_info['today_tokens']:,}</span>
+            </div>
+            <div class="account-metric-row">
+                <span>今日花費:</span>
+                <span style="font-weight:600;color:#4ade80">${acc_info['today_cost']:.4f}</span>
+            </div>
+            <div class="account-metric-row">
+                <span>429 速率限制次數:</span>
+                <span style="font-weight:600;color:{'#ef4444' if acc_info['today_429'] > 0 else '#8b949e'}">{acc_info['today_429']} 次</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+st.markdown("<hr style='border-color:#30363d;margin:12px 0 20px 0'>", unsafe_allow_html=True)
+
+# ═══════════════════════════════════════════════════════════════
+# 2. 頂部導覽切換 (Google AI Studio Rate Limits vs Antigravity IDE)
 # ═══════════════════════════════════════════════════════════════
 
 view_mode = st.radio(
@@ -387,7 +458,7 @@ if view_mode == "🛸 Antigravity IDE (Models & Usage 配額追蹤)":
             cal_h_pct = st.number_input("Gemini 5 小時剩餘百分比 (%)", min_value=0.0, max_value=100.0, value=float(agy_quota['gemini_5hr_pct']), step=1.0)
             cal_h_mins = st.number_input("Gemini 5 小時重置剩餘分鐘數 (預設 264 分 = 4小時24分)", min_value=0.0, max_value=300.0, value=264.0, step=1.0)
 
-        if st.button("💾 儲存並更新 Antigravity 配額狀態", type="primary", use_container_width=True):
+        if st.button("💾 儲存並更新 Antigravity 配額狀態", type="primary", width="stretch"):
             update_antigravity_quota(
                 gemini_weekly_pct=cal_w_pct,
                 gemini_weekly_hours=cal_w_hrs,
@@ -422,7 +493,7 @@ else:
     st.markdown("""
     <div class="rate-table-container">
         <div class="rate-table-header">Rate limits by model (10 款模型全覆蓋)</div>
-        <div class="rate-table-sub">Peak usage per model compared to its limit (追蹤帳號: <strong>{}</strong>)</div>
+        <div class="rate-table-sub">Peak usage per model compared to its limit (目前篩選帳號: <strong>{}</strong>)</div>
     """.format(selected_account), unsafe_allow_html=True)
 
     # 表頭
@@ -479,7 +550,7 @@ else:
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════
-# 2. 核心指標卡片 (Metric Cards)
+# 3. 核心指標卡片 (Metric Cards)
 # ═══════════════════════════════════════════════════════════════
 
 col1, col2, col3, col4 = st.columns(4)
@@ -487,7 +558,7 @@ col1, col2, col3, col4 = st.columns(4)
 with col1:
     st.markdown(f"""
     <div class="metric-card">
-        <div class="metric-title">今日總呼叫次數</div>
+        <div class="metric-title">今日總呼叫次數 ({selected_account})</div>
         <div class="metric-value">{stats['today_calls']:,} <span style="font-size:1rem;color:#8b949e">次</span></div>
         <div class="metric-sub">歷史總計: {stats['all_calls']:,} 次</div>
     </div>
@@ -524,7 +595,7 @@ with col4:
 st.markdown("<br>", unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════
-# 3. 主分頁區塊 (Main Tabs)
+# 4. 主分頁區塊 (Main Tabs)
 # ═══════════════════════════════════════════════════════════════
 
 tab1, tab2, tab3, tab4 = st.tabs(["📈 用量與費用趨勢", "🤖 模型與帳號分析", "📋 API 呼叫日誌", "⚡ Live 探針測試"])
@@ -563,7 +634,7 @@ with tab1:
                 color_discrete_map={'prompt_tokens': '#60a5fa', 'output_tokens': '#c084fc'}
             )
             fig_tokens.update_layout(template="plotly_dark", barmode='stack')
-            st.plotly_chart(fig_tokens, use_container_width=True)
+            st.plotly_chart(fig_tokens, width="stretch")
 
         with col_t2:
             st.markdown("#### 🔹 請求次數與預估費用")
@@ -575,7 +646,7 @@ with tab1:
             )
             fig_cost.update_traces(line_color='#4ade80', marker_size=8)
             fig_cost.update_layout(template="plotly_dark")
-            st.plotly_chart(fig_cost, use_container_width=True)
+            st.plotly_chart(fig_cost, width="stretch")
 
 # ── TAB 2: Model & Account Breakdown ──
 with tab2:
@@ -593,7 +664,7 @@ with tab2:
                 hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel
             )
             fig_pie.update_layout(template="plotly_dark")
-            st.plotly_chart(fig_pie, use_container_width=True)
+            st.plotly_chart(fig_pie, width="stretch")
 
         with col_m2:
             st.markdown("#### 🧑‍💼 各帳號用量分布 (Calls by Account)")
@@ -604,7 +675,7 @@ with tab2:
                     title="各帳號 Token 總消耗", labels={'total_tokens': 'Token 總數', 'account_name': '帳號名稱'}
                 )
                 fig_acc.update_layout(template="plotly_dark")
-                st.plotly_chart(fig_acc, use_container_width=True)
+                st.plotly_chart(fig_acc, width="stretch")
 
         st.markdown("#### 📋 模型統計詳細數據")
         model_detail = df.groupby('model_name').agg({
@@ -621,7 +692,7 @@ with tab2:
                 'estimated_cost': '總費用 (USD)',
                 'latency_ms': '平均回應時間 (ms)'
             }),
-            use_container_width=True
+            width="stretch"
         )
 
 # ── TAB 3: Logs ──
@@ -657,7 +728,7 @@ with tab3:
 
         cols_to_show = ['id', 'timestamp', 'account_name', 'model_name', 'prompt_tokens', 'output_tokens', 'total_tokens', 'latency_ms', 'status_code', 'estimated_cost', 'caller_info', 'error_message']
         existing_cols = [c for c in cols_to_show if c in df_filtered.columns]
-        st.dataframe(df_filtered[existing_cols], use_container_width=True)
+        st.dataframe(df_filtered[existing_cols], width="stretch")
 
 # ── TAB 4: Live Probe Tester ──
 with tab4:
@@ -679,7 +750,7 @@ with tab4:
         model_choice = st.selectbox("測試模型", ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"])
         test_prompt = st.text_area("測試 Prompt", value="請用繁體中文簡要回答：什麼是人工智慧的 RAG 架構？(50字內)")
 
-    if st.button("🚀 發送探針測試請求", type="primary", use_container_width=True):
+    if st.button("🚀 發送探針測試請求", type="primary", width="stretch"):
         if not api_key_input:
             st.error("❌ 找不到該帳號的 API Key，請在 .env 中填寫！")
         else:
