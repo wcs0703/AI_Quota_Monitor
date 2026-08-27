@@ -29,6 +29,14 @@ import argparse
 from pathlib import Path
 from datetime import datetime, timedelta
 
+# 確保在 Windows CP950 主機環境下輸出 Emoji 符號不崩潰
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # 設定路徑
 BASE_DIR = Path(__file__).resolve().parent
 WORKSPACE_DIR = BASE_DIR.parent
@@ -59,7 +67,7 @@ except ImportError:
 def get_all_gemini_keys() -> dict:
     """取得所有已在 .env 中設定的 Gemini API 金鑰清單"""
     keys = {}
-    for var_name in ["Whisper_correction", "Whiskey_correction", "GEMINI_API_KEY_3", "GEMINI_API_KEY", "GOOGLE_API_KEY"]:
+    for var_name in ["Whisper_correction", "Whiskey_correction", "GEMINI_API_KEY_3", "GEMINI_API_KEY", "JAV_Translate", "GOOGLE_API_KEY"]:
         val = os.getenv(var_name)
         if val and val.strip() and val.strip() not in keys.values():
             keys[var_name] = val.strip()
@@ -183,7 +191,7 @@ def send_ping(model_name: str = "gemini-3.6-flash") -> bool:
     """對所有在 .env 中設定的 Gemini 帳號發送 Keep-Alive 測試"""
     accounts = get_all_gemini_keys()
     if not accounts:
-        write_log("❌ 找不到任何 Gemini API Key，請確認 /Users/windfox/Github-Sync/.env 設定！")
+        write_log("❌ 找不到任何 Gemini API Key，請確認根目錄 .env 設定！")
         return False
 
     write_log(f"🔍 正在對 {len(accounts)} 個 Gemini 帳號發送 Keep-Alive Ping (模型: {model_name})...")

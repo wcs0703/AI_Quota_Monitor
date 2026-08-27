@@ -1,9 +1,24 @@
+import os
 import sqlite3
 import time
 import json
 import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple
+
+try:
+    from dotenv import load_dotenv
+    for env_candidate in [
+        Path(__file__).resolve().parent.parent / ".env",
+        Path(__file__).resolve().parent / ".env",
+        Path("/Users/windfox/Github-Sync/.env")
+    ]:
+        if env_candidate.exists():
+            load_dotenv(dotenv_path=env_candidate)
+            break
+    load_dotenv()
+except ImportError:
+    pass
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "gemini_usage.db"
@@ -110,7 +125,8 @@ def init_db():
         
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS antigravity_quota (
-                id INTEGER PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_name TEXT UNIQUE DEFAULT 'Google 帳號 1 (主要)',
                 plan_name TEXT DEFAULT 'Google AI Pro',
                 credit_overages INTEGER DEFAULT 0,
                 gemini_weekly_pct REAL DEFAULT 86.0,
@@ -129,42 +145,86 @@ def init_db():
         if "account_name" not in cols:
             cursor.execute("ALTER TABLE usage_logs ADD COLUMN account_name TEXT DEFAULT '預設帳號'")
 
+        cursor.execute("PRAGMA table_info(antigravity_quota)")
+        agy_cols = [col[1] for col in cursor.fetchall()]
+        if "account_name" not in agy_cols:
+            cursor.execute("ALTER TABLE antigravity_quota ADD COLUMN account_name TEXT DEFAULT 'Google 帳號 1 (主要)'")
+
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON usage_logs(timestamp)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_model ON usage_logs(model_name)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_account ON usage_logs(account_name)")
 
-        # 初始化一筆 Antigravity 配額預設資料 (若無資料)
+        # 初始化預設多組 Google 帳號 Antigravity 配額資料 (若無資料)
         cursor.execute("SELECT COUNT(*) FROM antigravity_quota")
         if cursor.fetchone()[0] == 0:
             cursor.execute("""
                 INSERT INTO antigravity_quota (
-                    id, plan_name, credit_overages,
+                    id, account_name, plan_name, credit_overages,
                     gemini_weekly_pct, gemini_weekly_refresh_seconds,
                     gemini_5hr_pct, gemini_5hr_refresh_seconds,
                     claude_gpt_weekly_pct, claude_gpt_5hr_pct, updated_at
-                ) VALUES (1, 'Google AI Pro', 0, 86.0, 169200, 92.0, 15840, 100.0, 100.0, datetime('now', 'localtime'))
+                ) VALUES 
+                (1, 'Google 帳號 1 (主要)', 'Google AI Pro', 0, 86.0, 169200, 92.0, 15840, 100.0, 100.0, datetime('now', 'localtime')),
+                (2, 'Google 帳號 2 (備用/工作)', 'Google AI Pro', 0, 100.0, 604800, 100.0, 18000, 100.0, 100.0, datetime('now', 'localtime'))
             """)
+        else:
+            # 確保第 2 組帳號存在
+            cursor.execute("SELECT COUNT(*) FROM antigravity_quota WHERE account_name = 'Google 帳號 2 (備用/工作)'")
+            if cursor.fetchone()[0] == 0:
+                cursor.execute("""
+                    INSERT OR IGNORE INTO antigravity_quota (
+                        account_name, plan_name, credit_overages,
+                        gemini_weekly_pct, gemini_weekly_refresh_seconds,
+                        gemini_5hr_pct, gemini_5hr_refresh_seconds,
+                        claude_gpt_weekly_pct, claude_gpt_5hr_pct, updated_at
+                    ) VALUES ('Google 帳號 2 (備用/工作)', 'Google AI Pro', 0, 100.0, 604800, 100.0, 18000, 100.0, 100.0, datetime('now', 'localtime'))
+                """)
 
         conn.commit()
 
 init_db()
 
 # --- Antigravity Quota Helpers ---
-def get_antigravity_quota() -> dict:
-    """取得 Antigravity IDE 當前模型配額狀態與倒數資訊"""
+def get_antigravity_accounts() -> list:
+    """取得所有已記錄的 Antigravity Google 帳號清單 (優先採用 .env 中的 Email 設定)"""
+    import os
+    email_1 = os.getenv("GOOGLE_ACCOUNT_1_EMAIL") or os.getenv("GOOGLE_EMAIL_1")
+    email_2 = os.getenv("GOOGLE_ACCOUNT_2_EMAIL") or os.getenv("GOOGLE_EMAIL_2")
+
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        if email_1 and email_1.strip():
+            cursor.execute("UPDATE antigravity_quota SET account_name = ? WHERE id = 1", (email_1.strip(),))
+        if email_2 and email_2.strip():
+            cursor.execute("UPDATE antigravity_quota SET account_name = ? WHERE id = 2", (email_2.strip(),))
+        conn.commit()
+
+        cursor.execute("SELECT DISTINCT account_name FROM antigravity_quota ORDER BY id ASC")
+        rows = cursor.fetchall()
+        accounts = [r[0] for r in rows if r[0]]
+        if not accounts:
+            accounts = [email_1 or "Google 帳號 1 (主要)", email_2 or "Google 帳號 2 (備用/工作)"]
+        return accounts
+
+def get_antigravity_quota(account_name: str = None) -> dict:
+    """取得指定 Antigravity IDE 帳號當前模型配額狀態與倒數資訊"""
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM antigravity_quota WHERE id = 1")
+        if account_name:
+            cursor.execute("SELECT * FROM antigravity_quota WHERE account_name = ? LIMIT 1", (account_name,))
+        else:
+            cursor.execute("SELECT * FROM antigravity_quota ORDER BY id ASC LIMIT 1")
         row = cursor.fetchone()
         if not row:
             return {
+                "account_name": account_name or "Google 帳號 1 (主要)",
                 "plan_name": "Google AI Pro",
                 "credit_overages": 0,
-                "gemini_weekly_pct": 86.0,
-                "gemini_weekly_desc": "1 day, 23 hours",
-                "gemini_5hr_pct": 92.0,
-                "gemini_5hr_desc": "4 hours, 24 minutes",
+                "gemini_weekly_pct": 100.0,
+                "gemini_weekly_desc": "7 days, 0 hours",
+                "gemini_5hr_pct": 100.0,
+                "gemini_5hr_desc": "5 hours, 0 minutes",
                 "claude_gpt_weekly_pct": 100.0,
                 "claude_gpt_5hr_pct": 100.0,
                 "updated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -192,6 +252,7 @@ def get_antigravity_quota() -> dict:
         return data
 
 def update_antigravity_quota(
+    account_name: str,
     gemini_weekly_pct: float,
     gemini_weekly_hours: float,
     gemini_5hr_pct: float,
@@ -199,20 +260,96 @@ def update_antigravity_quota(
     plan_name: str = "Google AI Pro",
     credit_overages: int = 0
 ):
-    """更新/校準 Antigravity 配額數據"""
+    """更新/校準指定 Antigravity 帳號配額數據"""
     weekly_sec = int(gemini_weekly_hours * 3600)
     fivehr_sec = int(gemini_5hr_mins * 60)
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            UPDATE antigravity_quota
-            SET plan_name = ?, credit_overages = ?,
-                gemini_weekly_pct = ?, gemini_weekly_refresh_seconds = ?,
-                gemini_5hr_pct = ?, gemini_5hr_refresh_seconds = ?,
+            INSERT INTO antigravity_quota (
+                account_name, plan_name, credit_overages,
+                gemini_weekly_pct, gemini_weekly_refresh_seconds,
+                gemini_5hr_pct, gemini_5hr_refresh_seconds,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+            ON CONFLICT(account_name) DO UPDATE SET
+                plan_name = excluded.plan_name,
+                credit_overages = excluded.credit_overages,
+                gemini_weekly_pct = excluded.gemini_weekly_pct,
+                gemini_weekly_refresh_seconds = excluded.gemini_weekly_refresh_seconds,
+                gemini_5hr_pct = excluded.gemini_5hr_pct,
+                gemini_5hr_refresh_seconds = excluded.gemini_5hr_refresh_seconds,
                 updated_at = datetime('now', 'localtime')
-            WHERE id = 1
-        """, (plan_name, credit_overages, gemini_weekly_pct, weekly_sec, gemini_5hr_pct, fivehr_sec))
+        """, (account_name, plan_name, credit_overages, gemini_weekly_pct, weekly_sec, gemini_5hr_pct, fivehr_sec))
         conn.commit()
+
+# --- DeepL Quota & Usage Helpers ---
+def get_deepl_usage(auth_key: Optional[str] = None) -> dict:
+    """
+    向 DeepL API 查詢當前帳號的翻譯字數配額與剩餘狀況
+    支援 Free Tier (以 :fx 結尾) 與 Pro Tier
+    """
+    import urllib.request
+    import urllib.error
+    import json
+
+    key = (auth_key or os.getenv("DEEPL_API_KEY") or "").strip()
+    if not key:
+        return {
+            "configured": False,
+            "status_msg": "未在 .env 設定 DEEPL_API_KEY",
+            "character_count": 0,
+            "character_limit": 500000,
+            "usage_pct": 0.0,
+            "remaining_chars": 500000,
+            "tier": "未設定"
+        }
+
+    is_free = key.endswith(":fx")
+    api_url = "https://api-free.deepl.com/v2/usage" if is_free else "https://api.deepl.com/v2/usage"
+
+    try:
+        req = urllib.request.Request(
+            api_url,
+            headers={
+                "Authorization": f"DeepL-Auth-Key {key}",
+                "User-Agent": "AI_Quota_Monitor/1.0"
+            }
+        )
+        with urllib.request.urlopen(req, timeout=8) as response:
+            data = json.loads(response.read().decode("utf-8"))
+            count = data.get("character_count", 0)
+            limit = data.get("character_limit", 500000)
+            pct = round((count / limit * 100), 2) if limit > 0 else 0.0
+            return {
+                "configured": True,
+                "status_msg": "正常連線",
+                "character_count": count,
+                "character_limit": limit,
+                "usage_pct": pct,
+                "remaining_chars": max(0, limit - count),
+                "tier": "Free (免費方案 50萬字/月)" if is_free else "Pro (付費方案)"
+            }
+    except urllib.error.HTTPError as e:
+        return {
+            "configured": True,
+            "status_msg": f"DeepL API 錯誤 HTTP {e.code}: {e.reason}",
+            "character_count": 0,
+            "character_limit": 500000,
+            "usage_pct": 0.0,
+            "remaining_chars": 0,
+            "tier": "金鑰無效或權限不足"
+        }
+    except Exception as e:
+        return {
+            "configured": True,
+            "status_msg": f"連線異常: {e}",
+            "character_count": 0,
+            "character_limit": 500000,
+            "usage_pct": 0.0,
+            "remaining_chars": 0,
+            "tier": "連線失敗"
+        }
 
 # --- Cost Calculator ---
 def calculate_cost(model_name: str, prompt_tokens: int, output_tokens: int) -> float:
