@@ -77,7 +77,7 @@ graph TD
 * **方式一（最直覺）**：直接在 Finder 雙擊 `start_keepalive.command`。
 * **方式二（背景常駐執行）**：
   ```bash
-  cd /Users/windfox/Github-Sync/AI_Quota_Monitor
+  cd ./AI_Quota_Monitor
   nohup ./start_keepalive.sh > logs/keepalive.log 2>&1 &
   ```
 

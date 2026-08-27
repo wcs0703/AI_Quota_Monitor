@@ -191,7 +191,7 @@ def send_ping(model_name: str = "gemini-3.6-flash") -> bool:
     """對所有在 .env 中設定的 Gemini 帳號發送 Keep-Alive 測試"""
     accounts = get_all_gemini_keys()
     if not accounts:
-        write_log("❌ 找不到任何 Gemini API Key，請確認 /Users/windfox/Github-Sync/.env 設定！")
+        write_log("❌ 找不到任何 Gemini API Key，請確認根目錄 .env 設定！")
         return False
 
     write_log(f"🔍 正在對 {len(accounts)} 個 Gemini 帳號發送 Keep-Alive Ping (模型: {model_name})...")
