@@ -893,11 +893,10 @@ with tab4:
     st.write("說明：選擇您在 `.env` 中設定的帳號金鑰發送測試請求，即時驗證 Token 統計與耗時，並自動寫入數據庫。")
 
     probe_accounts = {
-        "Whisper_correction (金鑰 1)": os.getenv("Whisper_correction", ""),
-        "Whiskey_correction (金鑰 2)": os.getenv("Whiskey_correction", ""),
-        "GEMINI_API_KEY_3 (金鑰 3)": os.getenv("GEMINI_API_KEY_3", ""),
-        "GEMINI_API_KEY (通用金鑰)": os.getenv("GEMINI_API_KEY", ""),
-        "JAV_Translate (日語翻譯金鑰)": os.getenv("JAV_Translate", "") or os.getenv("GOOGLE_API_KEY", "")
+        "GEMINI_PODCAST_KEY (Podcast挑錯)": os.getenv("GEMINI_PODCAST_KEY", ""),
+        "GEMINI_JAV_KEY (日語翻譯)": os.getenv("GEMINI_JAV_KEY", ""),
+        "GEMINI_FINANCE_KEY (台股金融)": os.getenv("GEMINI_FINANCE_KEY", ""),
+        "GEMINI_BACKUP_KEY_2 (備援金鑰)": os.getenv("GEMINI_BACKUP_KEY_2", "")
     }
 
     col_p1, col_p2 = st.columns(2)

@@ -484,15 +484,12 @@ def get_account_display_name(acc_name: str) -> str:
     """轉換帳號/Key名稱為友善顯示名稱 (精確綁定所屬 Google 帳號 Email 與用途)"""
     email_1 = os.getenv("GOOGLE_ACCOUNT_1_EMAIL", "shonarmstrong5@gmail.com")
     email_2 = os.getenv("GOOGLE_ACCOUNT_2_EMAIL", "dandyzuko2@gmail.com")
-    email_3 = os.getenv("GOOGLE_ACCOUNT_3_EMAIL", "karinayohanylaura727@gmail.com")
     
     mapping = {
-        "Whisper_correction": f"Whisper_correction ({email_1})",
-        "Whiskey_correction": f"Whiskey_correction ({email_2})",
-        "GEMINI_API_KEY_3": f"GEMINI_API_KEY_3 ({email_3})",
-        "GEMINI_API_KEY": f"GEMINI_API_KEY (Finance API / {email_1})",
-        "GOOGLE_API_KEY": f"GOOGLE_API_KEY (JAV_Translate / {email_1})",
-        "JAV_Translate": f"JAV_Translate ({email_1})"
+        "GEMINI_PODCAST_KEY": f"GEMINI_PODCAST_KEY (Podcast挑錯 / {email_1})",
+        "GEMINI_JAV_KEY": f"GEMINI_JAV_KEY (日語翻譯 / {email_1})",
+        "GEMINI_FINANCE_KEY": f"GEMINI_FINANCE_KEY (台股金融 / {email_1})",
+        "GEMINI_BACKUP_KEY_2": f"GEMINI_BACKUP_KEY_2 (備援金鑰 / {email_2})"
     }
     return mapping.get(acc_name, acc_name)
 
@@ -500,7 +497,12 @@ def get_available_accounts() -> list:
     """取得所有帳號名稱（結合 .env 中的金鑰名稱與資料庫記錄）"""
     accounts = []
     # 1. 檢查 .env
-    for var in ["Whisper_correction", "Whiskey_correction", "GEMINI_API_KEY_3", "GEMINI_API_KEY", "JAV_Translate", "GOOGLE_API_KEY"]:
+    for var in [
+        "GEMINI_PODCAST_KEY",
+        "GEMINI_JAV_KEY",
+        "GEMINI_FINANCE_KEY",
+        "GEMINI_BACKUP_KEY_2"
+    ]:
         if os.getenv(var) and os.getenv(var).strip():
             if var not in accounts:
                 accounts.append(var)
@@ -512,11 +514,11 @@ def get_available_accounts() -> list:
             if r[0] not in accounts:
                 accounts.append(r[0])
     if not accounts:
-        accounts = ["Whisper_correction", "Whiskey_correction", "GEMINI_API_KEY"]
+        accounts = ["GEMINI_PODCAST_KEY", "GEMINI_JAV_KEY", "GEMINI_FINANCE_KEY", "GEMINI_BACKUP_KEY_2"]
     return accounts
 
 def seed_default_official_snapshots():
-    """初始化官方 Google AI Studio 截圖基準數據 (針對 shonarmstrong5@gmail.com / Whisper_correction)"""
+    """初始化官方 Google AI Studio 截圖基準數據 (針對 shonarmstrong5@gmail.com / GEMINI_PODCAST_KEY)"""
     official_28d = {
         "gemini-3.7-flash": {"rpm": 6, "tpm": 150040.0, "rpd": 20},
         "gemini-3.6-flash": {"rpm": 3, "tpm": 14220.0, "rpd": 11},
@@ -533,7 +535,7 @@ def seed_default_official_snapshots():
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         for m_id, vals in official_28d.items():
-            for acc in ["Whisper_correction", "shonarmstrong5@gmail.com"]:
+            for acc in ["GEMINI_PODCAST_KEY", "shonarmstrong5@gmail.com"]:
                 cursor.execute("""
                     INSERT INTO rate_limits_snapshot (account_name, time_range, model_id, current_rpm, current_tpm, current_rpd, updated_at)
                     VALUES (?, '28 Days', ?, ?, ?, ?, datetime('now', 'localtime'))
@@ -666,7 +668,7 @@ def get_rate_limits_status(account_name: Optional[str] = None, time_range: str =
         
         # 讀取快照基準
         snapshot_data = {}
-        target_accs = [account_name] if (account_name and account_name != "全部帳號") else ["Whisper_correction", "shonarmstrong5@gmail.com"]
+        target_accs = [account_name] if (account_name and account_name != "全部帳號") else ["GEMINI_PODCAST_KEY", "shonarmstrong5@gmail.com"]
         
         for t_acc in target_accs:
             cursor.execute("""
@@ -760,7 +762,7 @@ def get_rate_limits_status(account_name: Optional[str] = None, time_range: str =
 def generate_mock_data(count: int = 15):
     import random
     models = ["gemini-3.7-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"]
-    accounts = ["Whisper_correction", "Whiskey_correction", "GEMINI_API_KEY_3"]
+    accounts = ["GEMINI_PODCAST_KEY", "GEMINI_JAV_KEY", "GEMINI_FINANCE_KEY", "GEMINI_BACKUP_KEY_2"]
     statuses = [200, 200, 200, 200, 200, 429, 200, 500]
     
     for _ in range(count):

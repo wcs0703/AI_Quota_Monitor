@@ -67,7 +67,7 @@ except ImportError:
 def get_all_gemini_keys() -> dict:
     """取得所有已在 .env 中設定的 Gemini API 金鑰清單"""
     keys = {}
-    for var_name in ["Whisper_correction", "Whiskey_correction", "GEMINI_API_KEY_3", "GEMINI_API_KEY", "JAV_Translate", "GOOGLE_API_KEY"]:
+    for var_name in ["GEMINI_PODCAST_KEY", "GEMINI_JAV_KEY", "GEMINI_FINANCE_KEY", "GEMINI_BACKUP_KEY_2"]:
         val = os.getenv(var_name)
         if val and val.strip() and val.strip() not in keys.values():
             keys[var_name] = val.strip()
