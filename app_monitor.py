@@ -12,17 +12,20 @@ from dotenv import load_dotenv
 # 載入環境變數
 env_path = Path(__file__).resolve().parent.parent / ".env"
 if env_path.exists():
-    load_dotenv(dotenv_path=env_path)
+    load_dotenv(dotenv_path=env_path, override=True)
 
 from gemini_logger import (
     DB_PATH,
     PRICING,
     MODEL_RATE_LIMITS,
+    get_account_display_name,
     get_stats_summary,
     get_recent_logs,
     get_available_accounts,
     get_all_accounts_overview,
     get_rate_limits_status,
+    save_rate_limits_snapshot,
+    seed_default_official_snapshots,
     get_antigravity_accounts,
     get_antigravity_quota,
     update_antigravity_quota,
@@ -262,11 +265,17 @@ st.sidebar.caption("Google AI Studio & Antigravity IDE 雙軌配額監控")
 
 # 帳號選擇器 (支援多帳號獨立切換)
 available_accounts = get_available_accounts()
-active_account_options = ["全部帳號 (All Accounts)"] + [a for a in available_accounts if a != "全部帳號"]
-selected_account = st.sidebar.selectbox("🧑‍💼 選擇獨立追蹤帳號 (Project/Key)", active_account_options)
-filter_account_name = None if "全部帳號" in selected_account else selected_account
+account_options_display = {
+    "全部帳號 (All Accounts)": "全部帳號 (All Accounts)"
+}
+for a in available_accounts:
+    account_options_display[get_account_display_name(a)] = a
 
-time_range_choice = st.sidebar.selectbox("⏳ 時間範圍 (Time Range)", ["今日 (Today)", "近 7 天 (7 Days)", "近 28 天 (28 Days)"])
+selected_display = st.sidebar.selectbox("🧑‍💼 選擇獨立追蹤帳號 (Project/Key)", list(account_options_display.keys()))
+filter_account_name = None if selected_display == "全部帳號 (All Accounts)" else account_options_display[selected_display]
+selected_account = selected_display
+
+time_range_choice = st.sidebar.selectbox("⏳ 時間範圍 (Time Range)", ["今日 (Today)", "近 7 天 (7 Days)", "近 28 天 (28 Days)"], index=2)
 
 auto_refresh = st.sidebar.checkbox("⏱️ 每 10 秒自動重新整理", value=False)
 if auto_refresh:
@@ -278,6 +287,11 @@ st.sidebar.subheader("🛠️ 工具與維護")
 if st.sidebar.button("🎲 產生測試模擬數據 (Seed Mock Data)", width="stretch"):
     generate_mock_data(15)
     st.sidebar.success("已成功產生 15 筆測試日誌數據！")
+    st.rerun()
+
+if st.sidebar.button("🔄 載入官方截圖 28 天基準數據", width="stretch"):
+    seed_default_official_snapshots()
+    st.sidebar.success("已成功載入官方 28 天基準數據！")
     st.rerun()
 
 if st.sidebar.button("🗑️ 清空所有記錄檔", width="stretch"):
@@ -292,10 +306,10 @@ st.sidebar.write("📌 **目前數據庫**:")
 st.sidebar.code(str(DB_PATH), language="bash")
 
 # ── Fetch Data ──
-stats = get_stats_summary(account_name=filter_account_name)
-rate_status_list, has_exceeded = get_rate_limits_status(account_name=filter_account_name)
+stats = get_stats_summary(account_name=filter_account_name, time_range=time_range_choice)
+rate_status_list, has_exceeded = get_rate_limits_status(account_name=filter_account_name, time_range=time_range_choice)
 agy_quota = get_antigravity_quota()
-accounts_overview = get_all_accounts_overview()
+accounts_overview = get_all_accounts_overview(time_range=time_range_choice)
 
 def load_data():
     if not DB_PATH.exists():
@@ -315,29 +329,30 @@ df = load_data()
 # 1. 🧑‍💼 各帳號即時狀態總覽橫向矩陣 (Multi-Account Status Grid)
 # ═══════════════════════════════════════════════════════════════
 
-st.markdown("<div style='font-size:1.15rem;font-weight:700;color:#f0f6fc;margin-bottom:10px'>🧑‍💼 3 組帳號即時狀態對比矩陣 (Multi-Account Overview)</div>", unsafe_allow_html=True)
+range_label = time_range_choice.split(' ')[0]
+st.markdown(f"<div style='font-size:1.15rem;font-weight:700;color:#f0f6fc;margin-bottom:10px'>🧑‍💼 3 組帳號即時狀態對比矩陣 ({range_label} Overview)</div>", unsafe_allow_html=True)
 
 acc_cols = st.columns(len(accounts_overview))
 for idx, acc_info in enumerate(accounts_overview):
     with acc_cols[idx]:
-        is_current = (filter_account_name == acc_info['account_name']) or (filter_account_name is None and "全部帳號" in selected_account)
+        is_current = (filter_account_name == acc_info['account_name']) or (filter_account_name is None)
         border_color = "#38bdf8" if filter_account_name == acc_info['account_name'] else "#30363d"
         st.markdown(f"""
         <div class="account-card" style="border-color:{border_color}">
             <div class="account-card-header">
-                <span class="account-card-title">🔑 {acc_info['account_name']}</span>
+                <span class="account-card-title">🔑 {acc_info['display_name']}</span>
                 <span>{acc_info['status']}</span>
             </div>
             <div class="account-metric-row">
-                <span>今日請求次數:</span>
+                <span>{range_label}請求次數:</span>
                 <span class="account-metric-val">{acc_info['today_calls']} 次</span>
             </div>
             <div class="account-metric-row">
-                <span>今日 Token 用量:</span>
+                <span>{range_label} Token 用量:</span>
                 <span class="account-metric-val">{acc_info['today_tokens']:,}</span>
             </div>
             <div class="account-metric-row">
-                <span>今日花費:</span>
+                <span>{range_label}花費:</span>
                 <span style="font-weight:600;color:#4ade80">${acc_info['today_cost']:.4f}</span>
             </div>
             <div class="account-metric-row">
@@ -586,13 +601,22 @@ elif view_mode == "🌐 DeepL API (翻譯字數配額監控)":
                     st.error(f"❌ DeepL 翻譯失敗: {ex}")
 
 else:
-    # ── Google AI Studio 10 款模型速率限制面板 ──
+    # ── Google AI Studio 11 款模型速率限制面板 ──
     st.markdown("""
     <div class="rate-limit-header">
         <span class="rate-limit-title">Gemini API Rate Limit</span>
         <span class="tier-badge">● Free tier</span>
     </div>
     """, unsafe_allow_html=True)
+
+    # 項目與時間範圍選單列 (比照官方 AI Studio 頂部控制列)
+    g_c1, g_c2, g_c3 = st.columns([3, 2, 2])
+    with g_c1:
+        st.markdown(f"**Project**: `{selected_account}`")
+    with g_c2:
+        st.markdown(f"**Time Range**: `{time_range_choice}`")
+    with g_c3:
+        st.markdown("<div style='text-align:right;color:#8b949e;font-size:0.85rem;padding-top:4px;'>📊 Peak usage over period</div>", unsafe_allow_html=True)
 
     # 若有超額，顯示紅色警示橫幅
     if has_exceeded or stats['today_429_count'] > 0:
@@ -606,12 +630,12 @@ else:
         </div>
         """, unsafe_allow_html=True)
 
-    # 10 款模型速率限制實時表格
-    st.markdown("""
+    # 11 款模型速率限制實時表格
+    st.markdown(f"""
     <div class="rate-table-container">
-        <div class="rate-table-header">Rate limits by model (10 款模型全覆蓋)</div>
-        <div class="rate-table-sub">Peak usage per model compared to its limit (目前篩選帳號: <strong>{}</strong>)</div>
-    """.format(selected_account), unsafe_allow_html=True)
+        <div class="rate-table-header">Rate limits by model (11 款模型全覆蓋)</div>
+        <div class="rate-table-sub">Peak usage per model compared to its limit over the last {time_range_choice.split(' ')[0]} (目前篩選帳號: <strong>{selected_account}</strong>)</div>
+    """, unsafe_allow_html=True)
 
     # 表頭
     h_c1, h_c2, h_c3, h_c4, h_c5, h_c6 = st.columns([2.4, 1.5, 1.8, 1.8, 1.8, 1.2])
@@ -624,7 +648,7 @@ else:
 
     st.markdown("<hr style='border-color:#30363d;margin:6px 0 12px 0'>", unsafe_allow_html=True)
 
-    # 依序呈現 10 款模型數據
+    # 依序呈現 11 款模型數據
     for item in rate_status_list:
         r_c1, r_c2, r_c3, r_c4, r_c5, r_c6 = st.columns([2.4, 1.5, 1.8, 1.8, 1.8, 1.2])
         
@@ -635,8 +659,12 @@ else:
         rpm_text_color = "#ef4444" if item['current_rpm'] >= item['max_rpm'] else "#f0f6fc"
         rpd_text_color = "#ef4444" if item['current_rpd'] >= item['max_rpd'] else "#f0f6fc"
 
-        tpm_display = f"{item['current_tpm'] / 1000:.2f}K" if item['current_tpm'] >= 1000 else f"{item['current_tpm']}"
-        max_tpm_display = f"{item['max_tpm'] / 1000:.0f}K"
+        if item['current_tpm'] >= 1000:
+            tpm_display = f"{item['current_tpm'] / 1000:.2f}K" if (item['current_tpm'] / 1000) % 1 != 0 else f"{int(item['current_tpm'] / 1000)}K"
+        else:
+            tpm_display = f"{int(item['current_tpm'])}"
+        
+        max_tpm_display = f"{int(item['max_tpm'] / 1000)}K"
 
         status_badge = "🔴 已達上限" if item['is_exceeded'] else ("🟡 接近上限" if item['rpd_pct'] >= 80 else "🟢 正常")
 
@@ -665,6 +693,18 @@ else:
         st.markdown("<div style='margin-bottom:6px'></div>", unsafe_allow_html=True)
 
     st.markdown("</div>", unsafe_allow_html=True)
+
+    # ── Google AI Studio 官方用量校準控制台 ──
+    with st.expander(f"🛠️ Google AI Studio 官方用量校準與同步控制台 ({selected_account} / {time_range_choice})"):
+        st.caption("說明：Google AI Studio 官方數據涵蓋雲端專案在各端（含網頁版、測試探針與全工具）的統計。在此可隨時校準或同步官方基準快照。")
+        cal_btn_col1, cal_btn_col2 = st.columns(2)
+        with cal_btn_col1:
+            if st.button("⚡ 一鍵同步官方 28 天截圖基準 (shonarmstrong5@gmail.com)", width="stretch"):
+                seed_default_official_snapshots()
+                st.success("✅ 已成功寫入官方 28 天基準數據！")
+                st.rerun()
+        with cal_btn_col2:
+            st.caption("💡 提示：若切換為近 28 天，將完整鏡像官方 Peak RPM、TPM 與 RPD。")
 
 # ═══════════════════════════════════════════════════════════════
 # 3. 核心指標卡片 (Metric Cards)

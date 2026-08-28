@@ -38,7 +38,7 @@ def load_pricing() -> Dict[str, Dict[str, float]]:
 
 PRICING = load_pricing()
 
-# --- Google AI Studio Free Tier Limits Definition (All 10 Models) ---
+# --- Google AI Studio Free Tier Limits Definition (All 11 Models) ---
 MODEL_RATE_LIMITS = {
     "gemini-3.7-flash": {
         "displayName": "Gemini 3.7 Flash",
@@ -46,17 +46,23 @@ MODEL_RATE_LIMITS = {
         "rpm": 5, "tpm": 250000, "rpd": 20,
         "aliases": ["gemini-3.7-flash", "gemini-3.7"]
     },
-    "gemini-3.5-flash": {
-        "displayName": "Gemini 3.5 Flash",
+    "gemini-3.6-flash": {
+        "displayName": "Gemini 3.6 Flash",
         "category": "Text-out models",
         "rpm": 5, "tpm": 250000, "rpd": 20,
-        "aliases": ["gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.5"]
+        "aliases": ["gemini-3.6-flash", "gemini-3.6"]
     },
     "gemini-2.5-flash": {
         "displayName": "Gemini 2.5 Flash",
         "category": "Text-out models",
         "rpm": 5, "tpm": 250000, "rpd": 20,
         "aliases": ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+    },
+    "gemini-3.5-flash": {
+        "displayName": "Gemini 3.5 Flash",
+        "category": "Text-out models",
+        "rpm": 5, "tpm": 250000, "rpd": 20,
+        "aliases": ["gemini-3.5-flash", "gemini-3.5"]
     },
     "gemini-3.1-flash-lite": {
         "displayName": "Gemini 3.1 Flash Lite",
@@ -138,6 +144,19 @@ def init_db():
                 updated_at DATETIME DEFAULT (datetime('now', 'localtime'))
             )
         """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS rate_limits_snapshot (
+                account_name TEXT,
+                time_range TEXT,
+                model_id TEXT,
+                current_rpm INTEGER DEFAULT 0,
+                current_tpm REAL DEFAULT 0.0,
+                current_rpd INTEGER DEFAULT 0,
+                updated_at DATETIME DEFAULT (datetime('now', 'localtime')),
+                PRIMARY KEY (account_name, time_range, model_id)
+            )
+        """)
         
         # 檢查並自動遷移舊版資料表 (追加 account_name 欄位)
         cursor.execute("PRAGMA table_info(usage_logs)")
@@ -153,8 +172,9 @@ def init_db():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON usage_logs(timestamp)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_model ON usage_logs(model_name)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_account ON usage_logs(account_name)")
+        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_agy_account ON antigravity_quota(account_name)")
 
-        # 初始化預設多組 Google 帳號 Antigravity 配額資料 (若無資料)
+        # 初始化預設 3 組 Google 帳號 Antigravity 配額資料 (若無資料)
         cursor.execute("SELECT COUNT(*) FROM antigravity_quota")
         if cursor.fetchone()[0] == 0:
             cursor.execute("""
@@ -165,20 +185,9 @@ def init_db():
                     claude_gpt_weekly_pct, claude_gpt_5hr_pct, updated_at
                 ) VALUES 
                 (1, 'Google 帳號 1 (主要)', 'Google AI Pro', 0, 86.0, 169200, 92.0, 15840, 100.0, 100.0, datetime('now', 'localtime')),
-                (2, 'Google 帳號 2 (備用/工作)', 'Google AI Pro', 0, 100.0, 604800, 100.0, 18000, 100.0, 100.0, datetime('now', 'localtime'))
+                (2, 'Google 帳號 2 (備用/工作)', 'Google AI Pro', 0, 100.0, 604800, 100.0, 18000, 100.0, 100.0, datetime('now', 'localtime')),
+                (3, 'Google 帳號 3 (備用)', 'Google AI Pro', 0, 100.0, 604800, 100.0, 18000, 100.0, 100.0, datetime('now', 'localtime'))
             """)
-        else:
-            # 確保第 2 組帳號存在
-            cursor.execute("SELECT COUNT(*) FROM antigravity_quota WHERE account_name = 'Google 帳號 2 (備用/工作)'")
-            if cursor.fetchone()[0] == 0:
-                cursor.execute("""
-                    INSERT OR IGNORE INTO antigravity_quota (
-                        account_name, plan_name, credit_overages,
-                        gemini_weekly_pct, gemini_weekly_refresh_seconds,
-                        gemini_5hr_pct, gemini_5hr_refresh_seconds,
-                        claude_gpt_weekly_pct, claude_gpt_5hr_pct, updated_at
-                    ) VALUES ('Google 帳號 2 (備用/工作)', 'Google AI Pro', 0, 100.0, 604800, 100.0, 18000, 100.0, 100.0, datetime('now', 'localtime'))
-                """)
 
         conn.commit()
 
@@ -186,25 +195,66 @@ init_db()
 
 # --- Antigravity Quota Helpers ---
 def get_antigravity_accounts() -> list:
-    """取得所有已記錄的 Antigravity Google 帳號清單 (優先採用 .env 中的 Email 設定)"""
+    """取得所有已記錄的 Antigravity Google 帳號清單 (優先採用 .env 中的 Email 設定，支援 3 組以上帳號)"""
     import os
-    email_1 = os.getenv("GOOGLE_ACCOUNT_1_EMAIL") or os.getenv("GOOGLE_EMAIL_1")
-    email_2 = os.getenv("GOOGLE_ACCOUNT_2_EMAIL") or os.getenv("GOOGLE_EMAIL_2")
+    try:
+        from dotenv import load_dotenv
+        for env_candidate in [
+            BASE_DIR.parent / ".env",
+            BASE_DIR / ".env",
+            Path("/Users/windfox/Github-Sync/.env")
+        ]:
+            if env_candidate.exists():
+                load_dotenv(dotenv_path=env_candidate, override=True)
+                break
+    except Exception:
+        pass
+
+    # 讀取 .env 中的所有 Google 帳號 Email 設定 (支援 GOOGLE_ACCOUNT_1_EMAIL ~ GOOGLE_ACCOUNT_N_EMAIL 及別名)
+    configured_emails = []
+    for i in range(1, 10):
+        email = (os.getenv(f"GOOGLE_ACCOUNT_{i}_EMAIL") or os.getenv(f"GOOGLE_EMAIL_{i}") or "").strip()
+        if email:
+            configured_emails.append(email)
+        elif i <= 3:
+            default_labels = [
+                "Google 帳號 1 (主要)",
+                "Google 帳號 2 (備用/工作)",
+                "Google 帳號 3 (備用)"
+            ]
+            configured_emails.append(default_labels[i - 1])
 
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
-        if email_1 and email_1.strip():
-            cursor.execute("UPDATE antigravity_quota SET account_name = ? WHERE id = 1", (email_1.strip(),))
-        if email_2 and email_2.strip():
-            cursor.execute("UPDATE antigravity_quota SET account_name = ? WHERE id = 2", (email_2.strip(),))
+        
+        # 確保 UNIQUE 索引存在
+        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_agy_account ON antigravity_quota(account_name)")
+
+        # 暫時加上前綴以防止帳號名稱 UNIQUE 衝突 (如順序調換時)
+        cursor.execute("UPDATE antigravity_quota SET account_name = '__agy_temp__' || id")
+        
+        for idx, acc_email in enumerate(configured_emails, start=1):
+            cursor.execute("SELECT id FROM antigravity_quota WHERE id = ?", (idx,))
+            if cursor.fetchone():
+                cursor.execute("UPDATE antigravity_quota SET account_name = ? WHERE id = ?", (acc_email, idx))
+            else:
+                cursor.execute("""
+                    INSERT INTO antigravity_quota (
+                        id, account_name, plan_name, credit_overages,
+                        gemini_weekly_pct, gemini_weekly_refresh_seconds,
+                        gemini_5hr_pct, gemini_5hr_refresh_seconds,
+                        claude_gpt_weekly_pct, claude_gpt_5hr_pct, updated_at
+                    ) VALUES (?, ?, 'Google AI Pro', 0, 100.0, 604800, 100.0, 18000, 100.0, 100.0, datetime('now', 'localtime'))
+                """, (idx, acc_email))
+
+        # 刪除多餘的過期佔位行
+        cursor.execute("DELETE FROM antigravity_quota WHERE id > ?", (len(configured_emails),))
         conn.commit()
 
-        cursor.execute("SELECT DISTINCT account_name FROM antigravity_quota ORDER BY id ASC")
+        cursor.execute("SELECT account_name FROM antigravity_quota ORDER BY id ASC")
         rows = cursor.fetchall()
         accounts = [r[0] for r in rows if r[0]]
-        if not accounts:
-            accounts = [email_1 or "Google 帳號 1 (主要)", email_2 or "Google 帳號 2 (備用/工作)"]
-        return accounts
+        return accounts if accounts else configured_emails
 
 def get_antigravity_quota(account_name: str = None) -> dict:
     """取得指定 Antigravity IDE 帳號當前模型配額狀態與倒數資訊"""
@@ -265,22 +315,28 @@ def update_antigravity_quota(
     fivehr_sec = int(gemini_5hr_mins * 60)
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
+        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_agy_account ON antigravity_quota(account_name)")
         cursor.execute("""
-            INSERT INTO antigravity_quota (
-                account_name, plan_name, credit_overages,
-                gemini_weekly_pct, gemini_weekly_refresh_seconds,
-                gemini_5hr_pct, gemini_5hr_refresh_seconds,
-                updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
-            ON CONFLICT(account_name) DO UPDATE SET
-                plan_name = excluded.plan_name,
-                credit_overages = excluded.credit_overages,
-                gemini_weekly_pct = excluded.gemini_weekly_pct,
-                gemini_weekly_refresh_seconds = excluded.gemini_weekly_refresh_seconds,
-                gemini_5hr_pct = excluded.gemini_5hr_pct,
-                gemini_5hr_refresh_seconds = excluded.gemini_5hr_refresh_seconds,
+            UPDATE antigravity_quota SET
+                plan_name = ?,
+                credit_overages = ?,
+                gemini_weekly_pct = ?,
+                gemini_weekly_refresh_seconds = ?,
+                gemini_5hr_pct = ?,
+                gemini_5hr_refresh_seconds = ?,
                 updated_at = datetime('now', 'localtime')
-        """, (account_name, plan_name, credit_overages, gemini_weekly_pct, weekly_sec, gemini_5hr_pct, fivehr_sec))
+            WHERE account_name = ?
+        """, (plan_name, credit_overages, gemini_weekly_pct, weekly_sec, gemini_5hr_pct, fivehr_sec, account_name))
+        
+        if cursor.rowcount == 0:
+            cursor.execute("""
+                INSERT INTO antigravity_quota (
+                    account_name, plan_name, credit_overages,
+                    gemini_weekly_pct, gemini_weekly_refresh_seconds,
+                    gemini_5hr_pct, gemini_5hr_refresh_seconds,
+                    updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+            """, (account_name, plan_name, credit_overages, gemini_weekly_pct, weekly_sec, gemini_5hr_pct, fivehr_sec))
         conn.commit()
 
 # --- DeepL Quota & Usage Helpers ---
@@ -424,12 +480,28 @@ def log_gemini_response(response: Any, model_name: str, start_time: float, calle
     )
 
 # --- Database Query Helpers ---
+def get_account_display_name(acc_name: str) -> str:
+    """轉換帳號/Key名稱為友善顯示名稱 (精確綁定所屬 Google 帳號 Email 與用途)"""
+    email_1 = os.getenv("GOOGLE_ACCOUNT_1_EMAIL", "shonarmstrong5@gmail.com")
+    email_2 = os.getenv("GOOGLE_ACCOUNT_2_EMAIL", "dandyzuko2@gmail.com")
+    email_3 = os.getenv("GOOGLE_ACCOUNT_3_EMAIL", "karinayohanylaura727@gmail.com")
+    
+    mapping = {
+        "Whisper_correction": f"Whisper_correction ({email_1})",
+        "Whiskey_correction": f"Whiskey_correction ({email_2})",
+        "GEMINI_API_KEY_3": f"GEMINI_API_KEY_3 ({email_3})",
+        "GEMINI_API_KEY": f"GEMINI_API_KEY (Finance API / {email_1})",
+        "GOOGLE_API_KEY": f"GOOGLE_API_KEY (JAV_Translate / {email_1})",
+        "JAV_Translate": f"JAV_Translate ({email_1})"
+    }
+    return mapping.get(acc_name, acc_name)
+
 def get_available_accounts() -> list:
     """取得所有帳號名稱（結合 .env 中的金鑰名稱與資料庫記錄）"""
     accounts = []
     # 1. 檢查 .env
-    for var in ["Whisper_correction", "Whiskey_correction", "GEMINI_API_KEY_3", "GEMINI_API_KEY", "GOOGLE_API_KEY"]:
-        if os.getenv(var):
+    for var in ["Whisper_correction", "Whiskey_correction", "GEMINI_API_KEY_3", "GEMINI_API_KEY", "JAV_Translate", "GOOGLE_API_KEY"]:
+        if os.getenv(var) and os.getenv(var).strip():
             if var not in accounts:
                 accounts.append(var)
     # 2. 檢查資料庫
@@ -440,17 +512,65 @@ def get_available_accounts() -> list:
             if r[0] not in accounts:
                 accounts.append(r[0])
     if not accounts:
-        accounts = ["預設帳號"]
+        accounts = ["Whisper_correction", "Whiskey_correction", "GEMINI_API_KEY"]
     return accounts
 
-def get_all_accounts_overview() -> list:
-    """傳回所有帳號今日用量、Token、花費與 429 狀態總覽矩陣"""
+def seed_default_official_snapshots():
+    """初始化官方 Google AI Studio 截圖基準數據 (針對 shonarmstrong5@gmail.com / Whisper_correction)"""
+    official_28d = {
+        "gemini-3.7-flash": {"rpm": 6, "tpm": 150040.0, "rpd": 20},
+        "gemini-3.6-flash": {"rpm": 3, "tpm": 14220.0, "rpd": 11},
+        "gemini-2.5-flash": {"rpm": 2, "tpm": 8.0, "rpd": 5},
+        "gemini-3.5-flash": {"rpm": 2, "tpm": 135850.0, "rpd": 20},
+        "gemini-3.1-flash-lite": {"rpm": 1, "tpm": 5.0, "rpd": 1},
+        "gemini-3.5-flash-lite": {"rpm": 1, "tpm": 7350.0, "rpd": 1},
+        "antigravity": {"rpm": 0, "tpm": 0.0, "rpd": 0},
+        "nano-banana-pro": {"rpm": 0, "tpm": 0.0, "rpd": 0},
+        "gemini-3.1-pro": {"rpm": 0, "tpm": 0.0, "rpd": 0},
+        "nano-banana-2": {"rpm": 0, "tpm": 0.0, "rpd": 0},
+        "nano-banana-2-lite": {"rpm": 0, "tpm": 0.0, "rpd": 0},
+    }
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        for m_id, vals in official_28d.items():
+            for acc in ["Whisper_correction", "shonarmstrong5@gmail.com"]:
+                cursor.execute("""
+                    INSERT INTO rate_limits_snapshot (account_name, time_range, model_id, current_rpm, current_tpm, current_rpd, updated_at)
+                    VALUES (?, '28 Days', ?, ?, ?, ?, datetime('now', 'localtime'))
+                    ON CONFLICT(account_name, time_range, model_id) DO UPDATE SET
+                        current_rpm = excluded.current_rpm,
+                        current_tpm = excluded.current_tpm,
+                        current_rpd = excluded.current_rpd,
+                        updated_at = datetime('now', 'localtime')
+                """, (acc, m_id, vals["rpm"], vals["tpm"], vals["rpd"]))
+        conn.commit()
+
+def save_rate_limits_snapshot(account_name: str, time_range: str, rate_dict: dict):
+    """保存/校準特定帳號在特定時間區間內的官方 Rate Limits 數據快照"""
+    range_key = "28 Days" if "28" in time_range else ("7 Days" if "7" in time_range else "Today")
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        for m_id, vals in rate_dict.items():
+            cursor.execute("""
+                INSERT INTO rate_limits_snapshot (account_name, time_range, model_id, current_rpm, current_tpm, current_rpd, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+                ON CONFLICT(account_name, time_range, model_id) DO UPDATE SET
+                    current_rpm = excluded.current_rpm,
+                    current_tpm = excluded.current_tpm,
+                    current_rpd = excluded.current_rpd,
+                    updated_at = datetime('now', 'localtime')
+            """, (account_name, range_key, m_id, vals.get("rpm", 0), vals.get("tpm", 0.0), vals.get("rpd", 0)))
+        conn.commit()
+
+def get_all_accounts_overview(time_range: str = "今日 (Today)") -> list:
+    """傳回所有帳號用量、Token、花費與 429 狀態總覽矩陣"""
     accounts = get_available_accounts()
     overview = []
     for acc in accounts:
-        st = get_stats_summary(account_name=acc)
+        st = get_stats_summary(account_name=acc, time_range=time_range)
         overview.append({
             "account_name": acc,
+            "display_name": get_account_display_name(acc),
             "today_calls": st["today_calls"],
             "today_tokens": st["today_total_tokens"],
             "today_cost": st["today_cost"],
@@ -470,14 +590,19 @@ def get_recent_logs(limit: int = 100, account_name: Optional[str] = None):
             cursor.execute("SELECT * FROM usage_logs ORDER BY id DESC LIMIT ?", (limit,))
         return [dict(row) for row in cursor.fetchall()]
 
-def get_stats_summary(account_name: Optional[str] = None):
+def get_stats_summary(account_name: Optional[str] = None, time_range: str = "今日 (Today)"):
+    """取得特定時間範圍與特定帳號的統計數據"""
+    if "28" in time_range:
+        date_filter = "datetime(timestamp) >= datetime('now', '-28 days', 'localtime')"
+    elif "7" in time_range:
+        date_filter = "datetime(timestamp) >= datetime('now', '-7 days', 'localtime')"
+    else:
+        date_filter = "date(timestamp) = date('now', 'localtime')"
+
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
-        today_str = datetime.date.today().isoformat()
-        
         filter_sql = "AND account_name = ?" if (account_name and account_name != "全部帳號") else ""
-        params_today = [today_str, account_name] if filter_sql else [today_str]
-        params_all = [account_name] if filter_sql else []
+        params_range = [account_name] if filter_sql else []
 
         cursor.execute(f"""
             SELECT 
@@ -490,9 +615,9 @@ def get_stats_summary(account_name: Optional[str] = None):
                 SUM(CASE WHEN status_code = 429 THEN 1 ELSE 0 END),
                 SUM(CASE WHEN status_code != 200 THEN 1 ELSE 0 END)
             FROM usage_logs
-            WHERE date(timestamp) = ? {filter_sql}
-        """, params_today)
-        today_row = cursor.fetchone()
+            WHERE {date_filter} {filter_sql}
+        """, params_range)
+        range_row = cursor.fetchone()
         
         cursor.execute(f"""
             SELECT 
@@ -503,34 +628,58 @@ def get_stats_summary(account_name: Optional[str] = None):
                 SUM(estimated_cost)
             FROM usage_logs
             WHERE 1=1 {filter_sql}
-        """, params_all)
+        """, params_range)
         all_row = cursor.fetchone()
 
         return {
-            "today_calls": today_row[0] or 0,
-            "today_prompt_tokens": today_row[1] or 0,
-            "today_output_tokens": today_row[2] or 0,
-            "today_total_tokens": today_row[3] or 0,
-            "today_cost": round(today_row[4] or 0.0, 4),
-            "today_avg_latency": round(today_row[5] or 0.0, 1),
-            "today_429_count": today_row[6] or 0,
-            "today_errors": today_row[7] or 0,
+            "today_calls": range_row[0] or 0,
+            "today_prompt_tokens": range_row[1] or 0,
+            "today_output_tokens": range_row[2] or 0,
+            "today_total_tokens": range_row[3] or 0,
+            "today_cost": round(range_row[4] or 0.0, 4),
+            "today_avg_latency": round(range_row[5] or 0.0, 1),
+            "today_429_count": range_row[6] or 0,
+            "today_errors": range_row[7] or 0,
             "all_calls": all_row[0] or 0,
             "all_total_tokens": all_row[3] or 0,
             "all_cost": round(all_row[4] or 0.0, 4)
         }
 
-def get_rate_limits_status(account_name: Optional[str] = None):
+def get_rate_limits_status(account_name: Optional[str] = None, time_range: str = "今日 (Today)"):
     """
-    計算並傳回各模型的 RPM, TPM, RPD 實時用量與配額上限狀態 (比照 Google AI Studio 介面，涵蓋全部 10 款模型)
+    計算並傳回各模型的 RPM, TPM, RPD 實時用量與配額上限狀態 (比照 Google AI Studio 介面，涵蓋全部 11 款模型)
+    支援讀取 Rate Limits Snapshot 與本機資料庫最新用量疊加
     """
+    if "28" in time_range:
+        date_filter = "datetime(timestamp) >= datetime('now', '-28 days', 'localtime')"
+        range_key = "28 Days"
+    elif "7" in time_range:
+        date_filter = "datetime(timestamp) >= datetime('now', '-7 days', 'localtime')"
+        range_key = "7 Days"
+    else:
+        date_filter = "date(timestamp) = date('now', 'localtime')"
+        range_key = "Today"
+
     with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        today_str = datetime.date.today().isoformat()
-        one_min_ago = (datetime.datetime.now() - datetime.timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M:%S")
+        
+        # 讀取快照基準
+        snapshot_data = {}
+        target_accs = [account_name] if (account_name and account_name != "全部帳號") else ["Whisper_correction", "shonarmstrong5@gmail.com"]
+        
+        for t_acc in target_accs:
+            cursor.execute("""
+                SELECT model_id, current_rpm, current_tpm, current_rpd
+                FROM rate_limits_snapshot
+                WHERE account_name = ? AND time_range = ?
+            """, (t_acc, range_key))
+            for row in cursor.fetchall():
+                snapshot_data[row["model_id"]] = dict(row)
+            if snapshot_data:
+                break
 
         filter_acc = "AND account_name = ?" if (account_name and account_name != "全部帳號") else ""
-        
         status_list = []
         has_exceeded = False
 
@@ -538,41 +687,46 @@ def get_rate_limits_status(account_name: Optional[str] = None):
             aliases = limits.get("aliases", [model_id])
             placeholders = ",".join(["?"] * len(aliases))
 
-            # 1. 查詢今日 RPD (計算該模型及所有別名的呼叫次數與 Token)
-            params_rpd = [today_str] + aliases
-            if filter_acc:
-                params_rpd.append(account_name)
-            
+            # 1. 查詢該模型在該時間區間內的呼叫次數 (RPD)
+            params_rpd = aliases + ([account_name] if filter_acc else [])
             cursor.execute(f"""
                 SELECT COUNT(*), SUM(total_tokens)
                 FROM usage_logs
-                WHERE date(timestamp) = ? AND model_name IN ({placeholders}) {filter_acc}
+                WHERE {date_filter} AND model_name IN ({placeholders}) {filter_acc}
             """, params_rpd)
             rpd_row = cursor.fetchone()
-            current_rpd = rpd_row[0] or 0
-            today_tokens = rpd_row[1] or 0
+            logged_rpd = rpd_row[0] or 0
+            logged_tokens = rpd_row[1] or 0
 
-            # 2. 查詢當前 1 分鐘內的即時 RPM 與 TPM
-            params_min = [one_min_ago] + aliases
-            if filter_acc:
-                params_min.append(account_name)
-
+            # 2. 查詢該模型在該時間區間內的 Peak RPM 與 Peak TPM (按每分鐘分組取最大值)
             cursor.execute(f"""
-                SELECT COUNT(*), SUM(total_tokens)
+                SELECT COUNT(*) as min_cnt, SUM(total_tokens) as min_tok
                 FROM usage_logs
-                WHERE timestamp >= ? AND model_name IN ({placeholders}) {filter_acc}
-            """, params_min)
-            min_row = cursor.fetchone()
-            current_rpm = min_row[0] or 0
-            current_tpm = min_row[1] or 0
+                WHERE {date_filter} AND model_name IN ({placeholders}) {filter_acc}
+                GROUP BY strftime('%Y-%m-%d %H:%M', timestamp)
+                ORDER BY min_cnt DESC LIMIT 1
+            """, params_rpd)
+            peak_row = cursor.fetchone()
+            logged_peak_rpm = peak_row[0] if peak_row else 0
+            logged_peak_tpm = peak_row[1] if peak_row else 0
 
             # 3. 檢查最近是否有 429 錯誤
             cursor.execute(f"""
                 SELECT COUNT(*)
                 FROM usage_logs
-                WHERE date(timestamp) = ? AND model_name IN ({placeholders}) AND status_code = 429 {filter_acc}
+                WHERE {date_filter} AND model_name IN ({placeholders}) AND status_code = 429 {filter_acc}
             """, params_rpd)
             recent_429 = cursor.fetchone()[0] or 0
+
+            # 合併快照數據（若有手動或官方基準快照）
+            snap = snapshot_data.get(model_id, {})
+            base_rpm = snap.get("current_rpm", 0)
+            base_tpm = snap.get("current_tpm", 0.0)
+            base_rpd = snap.get("current_rpd", 0)
+
+            current_rpm = max(base_rpm, logged_peak_rpm)
+            current_tpm = max(base_tpm, logged_peak_tpm)
+            current_rpd = base_rpd + logged_rpd
 
             # 計算百分比與狀態
             rpd_pct = min((current_rpd / limits["rpd"]) * 100.0, 100.0) if limits["rpd"] > 0 else 0
