@@ -895,6 +895,7 @@ with tab4:
     probe_accounts = {
         "GEMINI_PODCAST_KEY (Podcast挑錯)": os.getenv("GEMINI_PODCAST_KEY", ""),
         "GEMINI_JAV_KEY (日語翻譯)": os.getenv("GEMINI_JAV_KEY", ""),
+        "GEMINI_JAV_TRANSLATE_2_KEY (日語翻譯2)": os.getenv("GEMINI_JAV_TRANSLATE_2_KEY", ""),
         "GEMINI_FINANCE_KEY (台股金融)": os.getenv("GEMINI_FINANCE_KEY", ""),
         "GEMINI_BACKUP_KEY_2 (備援金鑰)": os.getenv("GEMINI_BACKUP_KEY_2", "")
     }

@@ -488,6 +488,7 @@ def get_account_display_name(acc_name: str) -> str:
     mapping = {
         "GEMINI_PODCAST_KEY": f"GEMINI_PODCAST_KEY (Podcast挑錯 / {email_1})",
         "GEMINI_JAV_KEY": f"GEMINI_JAV_KEY (日語翻譯 / {email_1})",
+        "GEMINI_JAV_TRANSLATE_2_KEY": f"GEMINI_JAV_TRANSLATE_2_KEY (日語翻譯2 / {email_1})",
         "GEMINI_FINANCE_KEY": f"GEMINI_FINANCE_KEY (台股金融 / {email_1})",
         "GEMINI_BACKUP_KEY_2": f"GEMINI_BACKUP_KEY_2 (備援金鑰 / {email_2})"
     }
@@ -500,6 +501,7 @@ def get_available_accounts() -> list:
     for var in [
         "GEMINI_PODCAST_KEY",
         "GEMINI_JAV_KEY",
+        "GEMINI_JAV_TRANSLATE_2_KEY",
         "GEMINI_FINANCE_KEY",
         "GEMINI_BACKUP_KEY_2"
     ]:
@@ -514,7 +516,7 @@ def get_available_accounts() -> list:
             if r[0] not in accounts:
                 accounts.append(r[0])
     if not accounts:
-        accounts = ["GEMINI_PODCAST_KEY", "GEMINI_JAV_KEY", "GEMINI_FINANCE_KEY", "GEMINI_BACKUP_KEY_2"]
+        accounts = ["GEMINI_PODCAST_KEY", "GEMINI_JAV_KEY", "GEMINI_JAV_TRANSLATE_2_KEY", "GEMINI_FINANCE_KEY", "GEMINI_BACKUP_KEY_2"]
     return accounts
 
 def seed_default_official_snapshots():
@@ -762,7 +764,7 @@ def get_rate_limits_status(account_name: Optional[str] = None, time_range: str =
 def generate_mock_data(count: int = 15):
     import random
     models = ["gemini-3.7-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"]
-    accounts = ["GEMINI_PODCAST_KEY", "GEMINI_JAV_KEY", "GEMINI_FINANCE_KEY", "GEMINI_BACKUP_KEY_2"]
+    accounts = ["GEMINI_PODCAST_KEY", "GEMINI_JAV_KEY", "GEMINI_JAV_TRANSLATE_2_KEY", "GEMINI_FINANCE_KEY", "GEMINI_BACKUP_KEY_2"]
     statuses = [200, 200, 200, 200, 200, 429, 200, 500]
     
     for _ in range(count):
