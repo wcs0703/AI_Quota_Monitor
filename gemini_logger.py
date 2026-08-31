@@ -520,7 +520,7 @@ def get_available_accounts() -> list:
     return accounts
 
 def seed_default_official_snapshots():
-    """初始化官方 Google AI Studio 截圖基準數據 (針對 shonarmstrong5@gmail.com / GEMINI_PODCAST_KEY)"""
+    """初始化官方 Google AI Studio 截圖基準數據 (針對所有同屬 shonarmstrong5@gmail.com 的 Key 與帳號)"""
     official_28d = {
         "gemini-3.7-flash": {"rpm": 6, "tpm": 150040.0, "rpd": 20},
         "gemini-3.6-flash": {"rpm": 3, "tpm": 14220.0, "rpd": 11},
@@ -534,10 +534,19 @@ def seed_default_official_snapshots():
         "nano-banana-2": {"rpm": 0, "tpm": 0.0, "rpd": 0},
         "nano-banana-2-lite": {"rpm": 0, "tpm": 0.0, "rpd": 0},
     }
+    email_1 = os.getenv("GOOGLE_ACCOUNT_1_EMAIL", "shonarmstrong5@gmail.com")
+    target_keys = [
+        "GEMINI_PODCAST_KEY",
+        "GEMINI_JAV_KEY",
+        "GEMINI_JAV_TRANSLATE_2_KEY",
+        "GEMINI_FINANCE_KEY",
+        "Whisper_correction",
+        email_1
+    ]
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         for m_id, vals in official_28d.items():
-            for acc in ["GEMINI_PODCAST_KEY", "shonarmstrong5@gmail.com"]:
+            for acc in target_keys:
                 cursor.execute("""
                     INSERT INTO rate_limits_snapshot (account_name, time_range, model_id, current_rpm, current_tpm, current_rpd, updated_at)
                     VALUES (?, '28 Days', ?, ?, ?, ?, datetime('now', 'localtime'))
@@ -605,8 +614,8 @@ def get_stats_summary(account_name: Optional[str] = None, time_range: str = "今
 
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
-        filter_sql = "AND account_name = ?" if (account_name and account_name != "全部帳號") else ""
-        params_range = [account_name] if filter_sql else []
+        filter_acc = "AND account_name = ?" if (account_name and account_name != "全部帳號") else ""
+        params = [account_name] if filter_acc else []
 
         cursor.execute(f"""
             SELECT 
@@ -617,10 +626,10 @@ def get_stats_summary(account_name: Optional[str] = None, time_range: str = "今
                 SUM(estimated_cost),
                 AVG(latency_ms),
                 SUM(CASE WHEN status_code = 429 THEN 1 ELSE 0 END),
-                SUM(CASE WHEN status_code != 200 THEN 1 ELSE 0 END)
+                SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END)
             FROM usage_logs
-            WHERE {date_filter} {filter_sql}
-        """, params_range)
+            WHERE {date_filter} {filter_acc}
+        """, params)
         range_row = cursor.fetchone()
         
         cursor.execute(f"""
@@ -631,8 +640,8 @@ def get_stats_summary(account_name: Optional[str] = None, time_range: str = "今
                 SUM(total_tokens),
                 SUM(estimated_cost)
             FROM usage_logs
-            WHERE 1=1 {filter_sql}
-        """, params_range)
+            WHERE 1=1 {filter_acc}
+        """, params)
         all_row = cursor.fetchone()
 
         return {
@@ -652,7 +661,7 @@ def get_stats_summary(account_name: Optional[str] = None, time_range: str = "今
 def get_rate_limits_status(account_name: Optional[str] = None, time_range: str = "今日 (Today)"):
     """
     計算並傳回各模型的 RPM, TPM, RPD 實時用量與配額上限狀態 (比照 Google AI Studio 介面，涵蓋全部 11 款模型)
-    支援讀取 Rate Limits Snapshot 與本機資料庫最新用量疊加
+    支援讀取 Rate Limits Snapshot 與本機資料庫最新用量疊加，並自動映射所屬 Google 帳號的官方快照
     """
     if "28" in time_range:
         date_filter = "datetime(timestamp) >= datetime('now', '-28 days', 'localtime')"
@@ -664,13 +673,28 @@ def get_rate_limits_status(account_name: Optional[str] = None, time_range: str =
         date_filter = "date(timestamp) = date('now', 'localtime')"
         range_key = "Today"
 
+    email_1 = os.getenv("GOOGLE_ACCOUNT_1_EMAIL", "shonarmstrong5@gmail.com")
+    email_2 = os.getenv("GOOGLE_ACCOUNT_2_EMAIL", "dandyzuko2@gmail.com")
+    account_email_map = {
+        "GEMINI_PODCAST_KEY": email_1,
+        "GEMINI_JAV_KEY": email_1,
+        "GEMINI_JAV_TRANSLATE_2_KEY": email_1,
+        "GEMINI_FINANCE_KEY": email_1,
+        "Whisper_correction": email_1,
+        "GEMINI_BACKUP_KEY_2": email_2
+    }
+
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
-        # 讀取快照基準
+        # 讀取快照基準 (若個別 Key 無專屬快照，則向上繼承所屬 Google 帳號 Email 的基準)
         snapshot_data = {}
-        target_accs = [account_name] if (account_name and account_name != "全部帳號") else ["GEMINI_PODCAST_KEY", "shonarmstrong5@gmail.com"]
+        if account_name and account_name != "全部帳號":
+            mapped_email = account_email_map.get(account_name, email_1)
+            target_accs = [account_name, mapped_email]
+        else:
+            target_accs = [email_1, "GEMINI_PODCAST_KEY", "shonarmstrong5@gmail.com"]
         
         for t_acc in target_accs:
             cursor.execute("""
