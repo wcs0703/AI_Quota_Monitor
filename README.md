@@ -1,24 +1,24 @@
 # 📊 AI_Quota_Monitor — AI 配額守護與 API 監控系統
 
-**專案名稱**：`AI_Quota_Monitor`  
-**GitHub 倉庫**：`https://github.com/wcs0703/AI_Quota_Monitor.git`  
-**支援平台**：`macOS` / `Windows` / `Linux`  
+**專案名稱**：AI_Quota_Monitor  
+**GitHub 倉庫**：https://github.com/wcs0703/AI_Quota_Monitor.git  
+**支援平台**：macOS / Windows / Linux  
 **專案定位**：專為 AI 模型（Gemini / LLM）打造的跨平台 **Model 配額維持 (Keep-Alive)**、**即時使用量監控**、**成本計算** 與 **HTTP 異常追蹤系統**。
 
 ## 📅 發行日期
-`2026-08-17` (專案更名為 AI_Quota_Monitor，整合跨平台 Model Quota 守護與 5 小時配額維持機制)
+2026-08-31 (全面極簡化：移除外層 Shell 腳本，統一為純 Python 跨平台進入點)
 
 ---
 
 ## 🎯 專案兩大核心功能
 
-### 1. 🛡️ 跨平台 Model Quota 守護程式 (`quota_keepalive.py`)
-* **核心任務**：定時（預設每 4.5 小時）自動對 AI 模型發送極簡請求（1 字元），消耗 ~1 Token（成本 < $0.000001）。
+### 1. 🛡️ 跨平台 Model Quota 守護程式 (quota_keepalive.py)
+* **核心任務**：定時（預設每 4.5 小時）自動對 AI 模型發送極簡請求（1 字元），消耗 ~1 Token（成本 < .000001）。
 * **配額維持原理**：主流 AI 模型的速率限制（Rate Limit）通常以 **5 小時窗口** 計算。若長時間未使用，5 小時重置倒數計時器不會啟動；透過定期微小 Ping，**可提前啟動 5 小時重置倒數**，避免臨時重度使用時重置時間被往後延。
-* **零相依跨平台**：採用純 Python 標準庫 (`urllib.request`) 實作 HTTP 請求，完全無第三方 SDK 相依性，在 **macOS / Windows / Linux** 皆可直接執行。
-* **日誌與資料庫追蹤**：每次 Ping 結果自動寫入 `gemini_usage.db` SQLite 資料庫（標記來源為 `Quota_KeepAlive`）與 `logs/keepalive.log`。
+* **零相依跨平台**：採用純 Python 標準庫 (urllib.request) 實作 HTTP 請求，完全無第三方 SDK 相依性，在 **macOS / Windows / Linux** 皆可直接執行。
+* **日誌與資料庫追蹤**：每次 Ping 結果自動寫入 gemini_usage.db SQLite 資料庫（標記來源為 Quota_KeepAlive）與 logs/keepalive.log。
 
-### 2. 📊 Streamlit API 使用量與成本監控儀表板 (`app_monitor.py` & `gemini_logger.py`)
+### 2. 📊 Streamlit API 使用量與成本監控儀表板 (pp_monitor.py & gemini_logger.py)
 * **核心任務**：提供視覺化圖表分析與 API 實時測試探針。
 * **重點功能**：
     * **數據總覽卡片**：即時顯示今日與歷史總呼叫次數、總 Token 消耗量、估算總成本與平均延遲。
@@ -28,117 +28,52 @@
 
 ---
 
-## 🔄 系統架構與作業流程 (Architecture & Workflow)
-
-```mermaid
-graph TD
-    subgraph 🛡️ 配額維持模組
-        K1[定時器 4.5 小時觸發] --> K2[quota_keepalive.py 發送 1 Token 極簡請求]
-        K2 -->|啟動 5 小時配額倒數| K3[Gemini API 雲端模型]
-        K2 -->|記錄維持數據| DB[(gemini_usage.db SQLite)]
-        K2 -->|輸出文字紀錄| LOG[logs/keepalive.log]
-    end
-
-    subgraph 📊 監控儀表板模組
-        A[外部應用程式/腳本呼叫 API] --> B[gemini_logger.py 記錄 Token / 延遲 / 狀態碼]
-        B --> C[讀取 model_pricing.json 計算成本]
-        C --> DB
-        DB --> E[app_monitor.py 讀取數據]
-        E --> F[Streamlit Web 控制台視覺化呈現]
-    end
-```
-
----
-
 ## 🏗️ 檔案結構清單
 
 | 檔案/資料夾名稱 | 內容說明 | 適用平台 |
 | :--- | :--- | :--- |
-| **`quota_keepalive.py`** | 跨平台 Quota 守護與維持核心程式（純 Python HTTP 實作） | macOS / Windows / Linux |
-| **`start_keepalive.command`** | macOS Finder 雙擊即啟動守護程式 | macOS |
-| **`start_keepalive.sh`** | 終端機或背景常駐執行腳本 (`nohup`) | macOS / Linux |
-| **`start_keepalive.bat`** | Windows 雙擊即啟動守護批次檔 | Windows |
-| **`app_monitor.py`** | Streamlit 視覺化監控儀表板前端 | 跨平台 Web |
-| **`gemini_logger.py`** | SQLite 紀錄核心與成本計算邏輯 | 後端日誌模組 |
-| **`model_pricing.json`** | Gemini 模型最新計價設定字典 | 費率設定 |
-| **`gemini_usage.db`** | 本機 SQLite 數據庫檔 | 資料儲存 |
-| **`start_monitor.bat`** | Windows 雙擊啟動 Streamlit 儀表板 | Windows |
-| **`start_monitor.command`** | macOS Finder 雙擊啟動 Streamlit 儀表板 | macOS |
-| **`start_monitor.sh`** | 終端機啟動 Streamlit 儀表板 | macOS / Linux |
-| **`logs/`** | 存放維持紀錄 (`keepalive.log`) 與異常日誌 (`error.log`) | 本地日誌 |
+| **quota_keepalive.py** | 跨平台 Quota 守護與維持核心程式（純 Python HTTP 實作） | macOS / Windows / Linux |
+| **pp_monitor.py** | Streamlit 視覺化監控儀表板前端 | 跨平台 Web |
+| **gemini_logger.py** | SQLite 紀錄核心與成本計算邏輯 | 後端日誌模組 |
+| **model_pricing.json** | Gemini 模型最新計價設定字典 | 費率設定 |
+| **gemini_usage.db** | 本機 SQLite 數據庫檔 | 資料儲存 |
+| **logs/** | 存放維持紀錄 (keepalive.log) 與異常日誌 (error.log) | 本地日誌 |
 
 ---
 
-## 🚀 跨平台使用指南
+## 🚀 跨平台使用指南 (Antigravity IDE / 終端機通用)
 
 ### 1. 啟動 Model Quota 守護維持程式
-
-#### 🍎 macOS
-* **方式一（最直覺）**：直接在 Finder 雙擊 `start_keepalive.command`。
-* **方式二（背景常駐執行）**：
-  ```bash
-  cd ./AI_Quota_Monitor
-  nohup ./start_keepalive.sh > logs/keepalive.log 2>&1 &
-  ```
-
-#### 🪟 Windows
-* **方式一（最直覺）**：直接雙擊執行 `start_keepalive.bat`。
-* **方式二（命令提示字元 / PowerShell）**：
-  ```powershell
-  python quota_keepalive.py
-  ```
-
-#### 🐧 Linux
-```bash
-nohup python3 quota_keepalive.py > logs/keepalive.log 2>&1 &
-```
-
-#### 🔍 單次測試 Ping
-任何系統隨時可下達以下指令進行單次連線測試：
-```bash
-python quota_keepalive.py --once
-```
+支援在任何平台（macOS / Windows / Linux）透過標準 Python 直接執行：
+`ash
+python quota_keepalive.py
+`
+* **背景常駐執行 (macOS / Linux)**：
+  `ash
+  nohup python quota_keepalive.py > logs/keepalive.log 2>&1 &
+  `
+* **單次連線測試 Ping**：
+  `ash
+  python quota_keepalive.py --once
+  `
 
 ---
 
-### 2. 啟動 Streamlit 監控儀表板
-
-* **Windows**：直接雙擊 `start_monitor.bat` 或在終端機執行：
-  ```powershell
-  & "..\.venv\Scripts\streamlit.exe" run app_monitor.py --server.port 8502
-  ```
-* **macOS**：雙擊 `start_monitor.command` 或執行 `./start_monitor.sh`。
-* **Linux / 終端機手動啟動**：
-  ```bash
-  streamlit run app_monitor.py --server.port 8502
-  ```
-* 瀏覽器自動開啟 `http://localhost:8502` 即可檢視所有 API 呼叫、成本累計與 Keep-Alive 定時喚醒紀錄。
-
----
-
-## ⚙️ 環境變數與設定
-
-本系統會自動依序從以下路徑讀取金鑰，無需繁瑣配置：
-1. `AI_Quota_Monitor/.env`
-2. `Github-Sync/.env`
-3. `Whisper-Podcast/.env`
-
-支援的金鑰變數名稱（支援多組 Key 同步輪詢與獨立記錄）：
-```ini
-Whisper_correction=AIzaSy...
-Whiskey_correction=AIzaSy...
-GEMINI_API_KEY_3=AIzaSy...
-GEMINI_API_KEY=AIzaSy...
-JAV_Translate=AIzaSy...
-DEEPL_API_KEY=your_deepl_key...   # DeepL 翻譯 API (免費版以 :fx 結尾)
-```
+### 2. 啟動 Streamlit 視覺化監控儀表板
+`ash
+streamlit run app_monitor.py --server.port 8502
+`
+* 瀏覽器自動開啟 http://localhost:8502 即可檢視所有 API 呼叫、成本累計、DeepL 翻譯字數與 Keep-Alive 定時喚醒紀錄。
 
 ---
 
 ## 📝 改版紀錄 (Changelog)
 
-| **2026-08-28** | **Google AI Studio 官方截圖數據同步 & 金鑰帳號精確映射** | 1. **精確綁定 API Key 與 Google 帳號歸屬**：依據 Google AI Studio 控制台截圖，精確校正 `Whisper_correction` (`...MYIg`)、`GEMINI_API_KEY` (`...eQzg` / Finance API)、`JAV_Translate` (`...B5_I`) 歸屬於 `shonarmstrong5@gmail.com`；`Whiskey_correction` (`...ctMQ`) 歸屬於 `dandyzuko2@gmail.com`；第三組帳號對應 `karinayohanylaura727@gmail.com`。<br>2. **防止資料庫 UNIQUE 衝突與佔位殘留**：在同步帳號 Email 時導入安全更新機制與自動淘汰過期佔位資料，確保切換選單與 SQLite 資料表完全一致。<br>3. **官方 28 天基準同步 (Rate Limits Snapshot)**：新增 `gemini-3.6-flash` 獨立模型與 `rate_limits_snapshot` 快照表，支援載入 Google AI Studio 官方截圖中的 Peak RPM (如 3.7 Flash 6/5)、TPM (150.04K) 與 RPD (20/20) 超額警示。<br>4. **時間範圍動態計算與友善顯示名稱**：矩陣卡片與側邊欄選單支援映射友善 Email 標籤，並支援 `今日` / `近 7 天` / `近 28 天` 動態統計與校準同步。 |
-| **2026-08-27** | **DeepL API 翻譯字數監控 & 多 Google 帳號 Antigravity 鏡像升級** | 1. **新增 DeepL API 翻譯配額監控模組**：自動向 DeepL `/v2/usage` 查詢每月 50 萬字消耗進度、剩餘字數與方案狀態，並提供 Live 翻譯測試探針。<br>2. **升級 Antigravity 鏡像儀表板**：支援多 Google 帳號獨立切換與雙軌 Quota (Weekly / 5-Hour) 各別校準與倒數，並直覺呈現 Email。<br>3. **新增 `start_monitor.bat`** 支援 Windows 雙擊一鍵啟動 Streamlit 視覺化儀表板。<br>4. **跨平台相容補強**：全面將 `GOOGLE_API_KEY` 更名為 `JAV_Translate`，並修復 Windows CP950 控制台輸出。 |
-| **2026-08-26** | **Google AI Studio 10款模型速率限制 & Antigravity IDE 配額鏡像** | 1. 導入多帳號獨立追蹤機制，支援讀取 `.env` 中多組 Gemini API Keys (`Whisper_correction`, `Whiskey_correction`, `GEMINI_API_KEY` 等)。<br>2. 鏡像 Google AI Studio 之 **Rate limits by model** 視覺化面板，完整納入 10 款模型（含 Flash、Flash Lite、Pro、Antigravity、Nano Banana 圖像模型系列）之 RPM、TPM、RPD 實時用量、進度條與紅色上限警告。<br>3. 鏡像 **Antigravity IDE - Models & Usage (Google AI Pro)** 儀表板，支援雙軌監控 Gemini 每週配額 (86%) 與 5 小時配額 (92%) 倒數刷新時間，以及 Claude/GPT 模型配額 (100%)，提供校準控制台。<br>4. 升級 `quota_keepalive.py` 為全帳號輪巡守護，一次 Keep-Alive 同步維持全部 3 組帳號之 5 小時配額重置週期，並升級預設測試模型為 `gemini-3.6-flash`。 |
-| **2026-08-17** | **更名 AI_Quota_Monitor 與配額維持整合** | 1. 專案由 `Gemini_Monitor` 正式更名為 `AI_Quota_Monitor`，並連接 GitHub 倉庫 `https://github.com/wcs0703/AI_Quota_Monitor.git`。<br>2. 開發 `quota_keepalive.py` 跨平台守護程式，定時（每 4.5 小時）自動發送 1 Token 極簡請求，提前啟動 5 小時配額重置窗口。<br>3. 採用純 Python 標準庫 (urllib)，完全免除第三方 SDK 相依性。<br>4. 支援 macOS (`start_keepalive.command`/`.sh`) 與 Windows (`start_keepalive.bat`) 一鍵啟動。<br>5. 修復 `gemini_logger.py` 異常處理並整合 Keep-Alive 數據寫入 SQLite。 |
-| **2026-08-08** | **專案初版建立** | 1. 正式完成 Gemini API 數據日誌記錄核心 (`gemini_logger.py`) 與本機 SQLite 數據庫 (`gemini_usage.db`)。<br>2. 建立 Streamlit 視覺化監控儀表板 (`app_monitor.py`)，即時統計 Token 消耗、估算 USD 成本與延遲分析。<br>3. 導入 Live API Probe 測試介面與 HTTP 429 速率限制追蹤。 |
+| 改版日期 | 版本重點 | 詳細更新說明 |
+| :--- | :--- | :--- |
+| **2026-08-31** | **工作區架構全面極簡化 (Option A - Pure Python CLI)** | 1. **全面移除平台外層 Shell 腳本**：徹底移除 .bat、.sh 與 .command 包裝腳本，消除跨平台維護負擔與編碼差異。<br>2. **統一 Python 跨平台進入點**：全流程標準化為 python quota_keepalive.py 與 streamlit run app_monitor.py，原生支援 Antigravity IDE 與跨平台終端機。 |
+| **2026-08-28** | **Google AI Studio 官方截圖數據同步 & 金鑰帳號精確映射** | 1. **精確綁定 API Key 與 Google 帳號歸屬**：依據 Google AI Studio 控制台截圖，精確校正 Whisper_correction、GEMINI_API_KEY、JAV_Translate 與 Whiskey_correction 帳號映射。<br>2. **防止資料庫 UNIQUE 衝突與佔位殘留**：在同步帳號 Email 時導入安全更新機制。<br>3. **官方 28 天基準同步 (Rate Limits Snapshot)**：新增 gemini-3.6-flash 獨立模型與 
+ate_limits_snapshot 快照表。 |
+| **2026-08-27** | **DeepL API 翻譯字數監控 & 多 Google 帳號 Antigravity 鏡像升級** | 1. **新增 DeepL API 翻譯配額監控模組**：自動查詢每月 50 萬字消耗進度與剩餘字數。<br>2. **升級 Antigravity 鏡像儀表板**：支援多 Google 帳號獨立切換與雙軌 Quota 各別校準。 |
+| **2026-08-17** | **更名 AI_Quota_Monitor 與配額維持整合** | 1. 專案由 Gemini_Monitor 正式更名為 AI_Quota_Monitor。<br>2. 開發 quota_keepalive.py 跨平台守護程式，定時自動發送 1 Token 極簡請求。<br>3. 採用純 Python 標準庫 (urllib)，完全免除第三方 SDK 相依性。 |
+| **2026-08-08** | **專案初版建立** | 1. 正式完成 Gemini API 數據日誌記錄核心 (gemini_logger.py) 與本機 SQLite 數據庫 (gemini_usage.db)。<br>2. 建立 Streamlit 視覺化監控儀表板 (pp_monitor.py)。 |
