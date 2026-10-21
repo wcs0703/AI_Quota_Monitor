@@ -11,8 +11,4 @@ else
     VENV_PYTHON="python"
 fi
 
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    (sleep 1.5 && open "http://localhost:8502") &
-fi
-
-"$VENV_PYTHON" -m streamlit run "$SCRIPT_DIR/app_monitor.py" --server.port 8502 --server.address localhost --server.headless false
+"$VENV_PYTHON" "$SCRIPT_DIR/start_monitor.py" "$@"
