@@ -6,10 +6,6 @@ WORKSPACE_DIR="$( cd "$SCRIPT_DIR/.." && pwd )"
 VENV_PYTHON="$WORKSPACE_DIR/.venv/bin/python"
 mkdir -p "$SCRIPT_DIR/logs"
 
-echo "══════════════════════════════════════════════════"
-echo "🛡️  正在啟動 Gemini Model Quota 守護維持系統"
-echo "══════════════════════════════════════════════════"
-
 if [ -f "$WORKSPACE_DIR/.venv/bin/python" ]; then
     PYTHON_CMD="$WORKSPACE_DIR/.venv/bin/python"
 elif [ -f "$WORKSPACE_DIR/.venv/Scripts/python.exe" ]; then
@@ -20,4 +16,5 @@ else
     PYTHON_CMD="python"
 fi
 
-"$PYTHON_CMD" "$SCRIPT_DIR/quota_keepalive.py" "$@"
+"$PYTHON_CMD" "$SCRIPT_DIR/start_keepalive.py" "$@"
+

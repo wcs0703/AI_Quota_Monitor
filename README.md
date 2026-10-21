@@ -35,6 +35,7 @@
 | **[`start_monitor.bat`](./start_monitor.bat)** | Windows 儀表板一鍵啟動腳本 (Streamlit Port 8502) | Windows |
 | **[`start_monitor.sh`](./start_monitor.sh)** | macOS / Linux 儀表板一鍵啟動腳本 | macOS / Linux |
 | **[`start_monitor.command`](./start_monitor.command)** | macOS 訪達 (Finder) 雙擊一鍵啟動腳本 | macOS |
+| **[`start_keepalive.py`](./start_keepalive.py)** | 跨平台 Quota 守護維持一鍵啟動腳本 (自動偵測 .venv) | macOS / Windows / Linux |
 | **[`start_keepalive.bat`](./start_keepalive.bat)** | Windows Quota 守護維持一鍵啟動腳本 | Windows |
 | **[`start_keepalive.sh`](./start_keepalive.sh)** | macOS / Linux Quota 守護維持一鍵啟動腳本 | macOS / Linux |
 | **[`start_keepalive.command`](./start_keepalive.command)** | macOS 訪達 (Finder) 雙擊 Quota 守護啟動腳本 | macOS |
@@ -42,7 +43,7 @@
 | **[`app_monitor.py`](./app_monitor.py)** | Streamlit 視覺化監控儀表板前端 | 跨平台 Web |
 | **[`gemini_logger.py`](./gemini_logger.py)** | SQLite 紀錄核心與成本計算邏輯 | 後端日誌模組 |
 | **[`model_pricing.json`](./model_pricing.json)** | Gemini 模型最新計價設定字典 | 費率設定 |
-| **`gemini_usage.db`** | 本機 SQLite 數據庫檔 | 資料儲存 |
+| **`gemini_usage.db`** | 本機 SQLite 資料庫檔 | 資料儲存 |
 | **`logs/`** | 存放維持紀錄 (`keepalive.log`) 與異常日誌 (`error.log`) | 本地日誌 |
 
 ---
@@ -71,8 +72,20 @@
 
 ---
 
-### 2. 啟動 Model Quota 守護維持程式 (`quota_keepalive.py`)
+### 2. 啟動 Model Quota 守護維持程式 (`start_keepalive.py` / `quota_keepalive.py`)
 
+* **💻 跨平台 Python 一鍵啟動 (推薦，自動載入 .venv)**：
+  ```bash
+  python start_keepalive.py
+  ```
+  * **單次連線測試 Ping**：
+    ```bash
+    python start_keepalive.py --once
+    ```
+  * **背景常駐執行 (macOS / Linux)**：
+    ```bash
+    nohup python start_keepalive.py > logs/keepalive.log 2>&1 &
+    ```
 * **🪟 Windows**：
   * 直接雙擊 **[`start_keepalive.bat`](./start_keepalive.bat)**，或在終端機執行：
     ```powershell
@@ -85,18 +98,6 @@
     cd ~/Github-Sync/AI_Quota_Monitor
     ./start_keepalive.sh
     ```
-* **💻 跨平台 Python 命令行指令**：
-  ```bash
-  python quota_keepalive.py
-  ```
-  * **背景常駐執行 (macOS / Linux)**：
-    ```bash
-    nohup python quota_keepalive.py > logs/keepalive.log 2>&1 &
-    ```
-  * **單次連線測試 Ping**：
-    ```bash
-    python quota_keepalive.py --once
-    ```
 
 ---
 
@@ -104,6 +105,7 @@
 
 | 改版日期 | 版本重點 | 詳細更新說明 |
 | :--- | :--- | :--- |
+| **2026-10-21** | **新增跨平台 Python 守護啟動腳本 (`start_keepalive.py`)** | 1. **Python 啟動腳本化**：新增 [`start_keepalive.py`](./start_keepalive.py)，自動偵測工作區 `.venv` 虛擬環境（支援 macOS/Linux/Windows），解決 Windows 系統無法直接執行 Shell 腳本的痛點。<br>2. **雙軌相容相輔相成**：保留 [`start_keepalive.sh`](./start_keepalive.sh) 與 [`start_keepalive.bat`](./start_keepalive.bat) 並重定向至 `start_keepalive.py`，保持既有快捷啟動腳本無縫銜接。 |
 | **2026-08-31** | **完整保留跨平台一鍵啟動腳本 & 修復多金鑰官方快照繼承映射** | 1. **全套腳本還原與強化**：完整提供 [`start_monitor.bat`](./start_monitor.bat)、[`start_monitor.sh`](./start_monitor.sh)、[`start_monitor.command`](./start_monitor.command)、[`start_keepalive.bat`](./start_keepalive.bat)、[`start_keepalive.sh`](./start_keepalive.sh) 與 [`start_keepalive.command`](./start_keepalive.command)。<br>2. **修復個別金鑰快照繼承**：優化 `gemini_logger.py` 中的 `get_rate_limits_status` 與 `seed_default_official_snapshots`，讓同屬主要 Google 帳號 (`shonarmstrong5@gmail.com`) 的所有子金鑰（如 `GEMINI_JAV_KEY`、`GEMINI_FINANCE_KEY` 等）在切換至個別帳號時，能智慧繼承母帳號的 28 天官方速率限制快照基準，並精確累加各金鑰之本機獨立呼叫流量。 |
 | **2026-08-28** | **Google AI Studio 官方截圖數據同步 & 金鑰帳號精確映射** | 1. **精確綁定 API Key 與 Google 帳號歸屬**：依據 Google AI Studio 控制台截圖，精確校正 Whisper_correction、GEMINI_API_KEY、JAV_Translate 與 Whiskey_correction 帳號映射。<br>2. **防止資料庫 UNIQUE 衝突與佔位殘留**：在同步帳號 Email 時導入安全更新機制。<br>3. **官方 28 天基準同步 (Rate Limits Snapshot)**：新增 gemini-3.6-flash 獨立模型與 rate_limits_snapshot 快照表。 |
 | **2026-08-27** | **DeepL API 翻譯字數監控 & 多 Google 帳號 Antigravity 鏡像升級** | 1. **新增 DeepL API 翻譯配額監控模組**：自動查詢每月 50 萬字消耗進度與剩餘字數。<br>2. **升級 Antigravity 鏡像儀表板**：支援多 Google 帳號獨立切換與雙軌 Quota 各別校準。 |
