@@ -1,4 +1,8 @@
 {
+  "gemini-3.8-flash": {
+    "input_per_1m": 0.10,
+    "output_per_1m": 0.40
+  },
   "gemini-3.7-flash": {
     "input_per_1m": 0.10,
     "output_per_1m": 0.40

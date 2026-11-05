@@ -893,7 +893,8 @@ with tab4:
     st.write("說明：選擇您在 `.env` 中設定的帳號金鑰發送測試請求，即時驗證 Token 統計與耗時，並自動寫入數據庫。")
 
     probe_accounts = {
-        "GEMINI_PODCAST_KEY (Podcast挑錯)": os.getenv("GEMINI_PODCAST_KEY", ""),
+        "GEMINI_PODCAST_KEY (Podcast挑錯 1)": os.getenv("GEMINI_PODCAST_KEY", ""),
+        "GEMINI_PODCAST_KEY2 (Podcast挑錯 2)": os.getenv("GEMINI_PODCAST_KEY2", ""),
         "GEMINI_JAV_KEY (日語翻譯)": os.getenv("GEMINI_JAV_KEY", ""),
         "GEMINI_JAV_TRANSLATE_2_KEY (日語翻譯2)": os.getenv("GEMINI_JAV_TRANSLATE_2_KEY", ""),
         "GEMINI_FINANCE_KEY (台股金融)": os.getenv("GEMINI_FINANCE_KEY", ""),
@@ -906,7 +907,7 @@ with tab4:
         selected_key = probe_accounts[chosen_acc_label]
         api_key_input = st.text_input("API Key (自動載入)", value=selected_key, type="password")
     with col_p2:
-        model_choice = st.selectbox("測試模型", ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"])
+        model_choice = st.selectbox("測試模型", ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"])
         test_prompt = st.text_area("測試 Prompt", value="請用繁體中文簡要回答：什麼是人工智慧的 RAG 架構？(50字內)")
 
     if st.button("🚀 發送探針測試請求", type="primary", width="stretch"):

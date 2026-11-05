@@ -38,8 +38,14 @@ def load_pricing() -> Dict[str, Dict[str, float]]:
 
 PRICING = load_pricing()
 
-# --- Google AI Studio Free Tier Limits Definition (All 11 Models) ---
+# --- Google AI Studio Free Tier Limits Definition (All Models) ---
 MODEL_RATE_LIMITS = {
+    "gemini-3.8-flash": {
+        "displayName": "Gemini 3.8 Flash",
+        "category": "Text-out models",
+        "rpm": 5, "tpm": 250000, "rpd": 20,
+        "aliases": ["gemini-3.8-flash", "gemini-3.8"]
+    },
     "gemini-3.7-flash": {
         "displayName": "Gemini 3.7 Flash",
         "category": "Text-out models",
@@ -486,7 +492,8 @@ def get_account_display_name(acc_name: str) -> str:
     email_2 = os.getenv("GOOGLE_ACCOUNT_2_EMAIL", "dandyzuko2@gmail.com")
     
     mapping = {
-        "GEMINI_PODCAST_KEY": f"GEMINI_PODCAST_KEY (Podcast挑錯 / {email_1})",
+        "GEMINI_PODCAST_KEY": f"GEMINI_PODCAST_KEY (Podcast挑錯 1 / {email_1})",
+        "GEMINI_PODCAST_KEY2": f"GEMINI_PODCAST_KEY2 (Podcast挑錯 2 / {email_1})",
         "GEMINI_JAV_KEY": f"GEMINI_JAV_KEY (日語翻譯 / {email_1})",
         "GEMINI_JAV_TRANSLATE_2_KEY": f"GEMINI_JAV_TRANSLATE_2_KEY (日語翻譯2 / {email_1})",
         "GEMINI_FINANCE_KEY": f"GEMINI_FINANCE_KEY (台股金融 / {email_1})",
@@ -500,6 +507,7 @@ def get_available_accounts() -> list:
     # 1. 檢查 .env
     for var in [
         "GEMINI_PODCAST_KEY",
+        "GEMINI_PODCAST_KEY2",
         "GEMINI_JAV_KEY",
         "GEMINI_JAV_TRANSLATE_2_KEY",
         "GEMINI_FINANCE_KEY",
@@ -516,7 +524,7 @@ def get_available_accounts() -> list:
             if r[0] not in accounts:
                 accounts.append(r[0])
     if not accounts:
-        accounts = ["GEMINI_PODCAST_KEY", "GEMINI_JAV_KEY", "GEMINI_JAV_TRANSLATE_2_KEY", "GEMINI_FINANCE_KEY", "GEMINI_BACKUP_KEY_2"]
+        accounts = ["GEMINI_PODCAST_KEY", "GEMINI_PODCAST_KEY2", "GEMINI_JAV_KEY", "GEMINI_JAV_TRANSLATE_2_KEY", "GEMINI_FINANCE_KEY", "GEMINI_BACKUP_KEY_2"]
     return accounts
 
 def seed_default_official_snapshots():

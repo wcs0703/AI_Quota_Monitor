@@ -67,7 +67,7 @@ except ImportError:
 def get_all_gemini_keys() -> dict:
     """取得所有已在 .env 中設定的 Gemini API 金鑰清單"""
     keys = {}
-    for var_name in ["GEMINI_PODCAST_KEY", "GEMINI_JAV_KEY", "GEMINI_JAV_TRANSLATE_2_KEY", "GEMINI_FINANCE_KEY", "GEMINI_BACKUP_KEY_2"]:
+    for var_name in ["GEMINI_PODCAST_KEY", "GEMINI_PODCAST_KEY2", "GEMINI_JAV_KEY", "GEMINI_JAV_TRANSLATE_2_KEY", "GEMINI_FINANCE_KEY", "GEMINI_BACKUP_KEY_2"]:
         val = os.getenv(var_name)
         if val and val.strip() and val.strip() not in keys.values():
             keys[var_name] = val.strip()
@@ -86,7 +86,7 @@ def write_log(msg: str):
 
 def ping_single_account(account_name: str, api_key: str, model_name: str = "gemini-3.6-flash") -> bool:
     """針對單一帳號發送 1 Token 的極簡請求，並記錄至 SQLite 與文字日誌"""
-    models_to_try = [model_name, "gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-2.5-flash"]
+    models_to_try = [model_name, "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-2.5-flash"]
     # 去重且保持順序
     models_chain = []
     for m in models_to_try:
